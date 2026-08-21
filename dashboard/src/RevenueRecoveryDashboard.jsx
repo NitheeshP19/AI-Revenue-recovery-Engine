@@ -2,12 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  Legend, ResponsiveContainer, AreaChart, Area, Cell,
+  ResponsiveContainer, Cell,
 } from "recharts";
 import {
   TrendingUp, Zap, Activity, DollarSign, Brain, RefreshCw,
-  ArrowUpRight, CheckCircle2, XCircle, Clock, ChevronRight,
-  Cpu, Wifi, WifiOff, Play, Square, BarChart2,
+  ArrowUpRight, CheckCircle2, XCircle, Clock,
+  Cpu, Play, Square, BarChart2,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -504,13 +504,14 @@ export default function RevenueRecoveryDashboard() {
     ]);
   }, []);
 
+  // Only manage the interval lifecycle here — no direct setState call in effect body.
+  // The first event on "Start" is fired directly from the onClick handler below.
   useEffect(() => {
-    if (streaming) {
-      appendEvent();
-      intervalRef.current = setInterval(appendEvent, 2200);
-    } else {
+    if (!streaming) {
       clearInterval(intervalRef.current);
+      return;
     }
+    intervalRef.current = setInterval(appendEvent, 2200);
     return () => clearInterval(intervalRef.current);
   }, [streaming, appendEvent]);
 
@@ -627,7 +628,13 @@ export default function RevenueRecoveryDashboard() {
               </div>
 
               <button
-                onClick={() => setStreaming((s) => !s)}
+                onClick={() => {
+                  // Fire the first event immediately on Start so the feed responds
+                  // instantly, then the interval takes over. This avoids calling
+                  // setState directly inside useEffect (set-state-in-effect rule).
+                  if (!streaming) appendEvent();
+                  setStreaming((s) => !s);
+                }}
                 className={`flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all duration-200 ${
                   streaming
                     ? "bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25"

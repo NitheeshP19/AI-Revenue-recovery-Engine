@@ -47,6 +47,23 @@ When evaluating 200 failed payments side-by-side:
 
 ---
 
+## 🌍 Environment & Ports
+
+Two runtime environments are supported. Use **Local Dev** when running services natively, and **Docker Compose** when running via `docker-compose up`.
+
+| Service | Local Dev | Docker Compose | Notes |
+|---|---|---|---|
+| React Dashboard | `5173` | `5173` | Vite dev server |
+| Go Ingestion API | `8080` | `3000` | Fiber HTTP server |
+| ML Inference API | `8001` | `8000` | FastAPI + XGBoost |
+| Groq Agent API | `8002` | `8001` | FastAPI + Llama-3 |
+| PostgreSQL | Neon Cloud | `5432` (internal) | Serverless / container |
+
+> [!NOTE]
+> The local dev ports differ from Docker Compose because the Go binary defaults to `PORT=8080` while the Compose `environment` block overrides it to `PORT=3000`. The ML services similarly default to their internal ports.
+
+---
+
 ## 🚀 Installation & Local Setup
 
 ### 1. Prerequisites
