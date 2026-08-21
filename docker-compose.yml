@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: revenue_recovery_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  go-api:
+    build:
+      context: ./go-api
+      dockerfile: Dockerfile
+    container_name: revenue_recovery_go_api
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      PORT: 3000
+      APP_ENV: ${APP_ENV:-development}
+      # IMPORTANT: In production, restrict this to your real dashboard domain.
+      # e.g. ALLOWED_ORIGINS: "https://your-dashboard.vercel.app"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  ml-service:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile.inference
+    container_name: revenue_recovery_ml_service
+    environment:
+      PORT: 8000
+      ALLOWED_ORIGINS: "*"
+    ports:
+      - "8000:8000"
+    restart: always
+
+  groq-agent:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile.agent
+    container_name: revenue_recovery_groq_agent
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      PORT: 8001
+      # IMPORTANT: In production, restrict this to your real dashboard domain.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8001:8001"
+    restart: always
+
+volumes:
+  postgres_data:

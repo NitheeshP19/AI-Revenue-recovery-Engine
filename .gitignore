@@ -1,0 +1,51 @@
+# ==============================================================================
+#  AI Revenue Recovery System — Git Ignore Config
+# ==============================================================================
+
+# ── Environment & Secret Files ────────────────────────────────────────────────
+# Ignore all environment configurations that contain sensitive credentials
+.env
+.env.local
+.env.*
+!.env.example
+
+# ── Python Cache & Venv ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.pyo
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# ── Node / Frontend dependencies ──────────────────────────────────────────────
+node_modules/
+dist/
+.eslintcache
+
+# ── ML Model Artifacts & Training Data ───────────────────────────────────────
+# Large binary files — store in object storage (S3/GCS) or a model registry
+ml/classifier.json
+# Training datasets — regenerate with synthetic_data_generator.py
+failed_transactions.csv
+ml/ai-revenue-recovery/failed_transactions.csv
+
+# ── Operating System Files ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Compiled Go Binary ────────────────────────────────────────────────────────
+go-api/*.exe
+go-api/api
+
+# ── Generated Simulation Output ───────────────────────────────────────────────
+metrics_summary.json
+
+# ── Local scratch / IDE artifacts ─────────────────────────────────────────────
+scratch/
+walkthrough.md

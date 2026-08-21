@@ -1,0 +1,7 @@
+{
+  "0": "expired_card",
+  "1": "gateway_timeout",
+  "2": "incorrect_pin",
+  "3": "insufficient_funds",
+  "4": "risk_flag"
+}

@@ -1,0 +1,12 @@
+[
+  "amount",
+  "log_amount",
+  "customer_ltv",
+  "ltv_tier",
+  "recent_retries",
+  "time_since_last_attempt_mins",
+  "retry_velocity",
+  "pm_UPI",
+  "pm_Credit_Card",
+  "pm_Debit_Card"
+]

@@ -1,0 +1,25 @@
+# ============================================================
+#  AI Revenue Recovery — ML Service Requirements
+#  Phase 3: Failure Classifier
+#
+#  Usage:
+#    pip install -r requirements.txt
+# ============================================================
+
+# ── Core ML ────────────────────────────────────────────────
+xgboost>=2.1.0
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.5.0
+
+# ── Inference API ──────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+
+# ── LLM Agent Service (Phase 4) ────────────────────────────
+groq>=0.9.0
+python-dotenv>=1.0.1
+
+# ── Colab Training (visualisation — not needed for inference)
+matplotlib>=3.9.0
