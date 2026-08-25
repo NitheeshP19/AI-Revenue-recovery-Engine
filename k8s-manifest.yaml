@@ -14,7 +14,11 @@ metadata:
     app.kubernetes.io/part-of: ai-revenue-recovery
 data:
   APP_ENV: "development"
-  ALLOWED_ORIGINS: "*"
+  # CORS: restrict to your real dashboard origin in production.
+  # Override with: kubectl set configmap app-config ALLOWED_ORIGINS=https://your-dashboard.vercel.app
+  # Set ALLOW_INSECURE_CORS=true only in dev environments without a fixed origin.
+  ALLOWED_ORIGINS: "http://localhost:5173"
+  ALLOW_INSECURE_CORS: "false"
   PORT: "3000"          # Go Ingestion API container port
   ML_PORT: "8000"       # Python ML Service container port
   AGENT_PORT: "8001"    # Python Groq Agent container port

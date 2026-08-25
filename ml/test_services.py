@@ -1,4 +1,4 @@
-﻿"""
+"""
 ===============================================================================
   AI Revenue Recovery System — Service Tests
   Tests for: ML Inference Service and Groq Agent Service
@@ -181,3 +181,108 @@ def test_agent_fallback_no_key(agent_client):
     finally:
         # Restore original client
         svc.client = original_client
+
+
+def test_agent_fallback_status_field(agent_client):
+    """
+    When Groq client is None (agent unavailable), the response MUST include
+    fallback_status == 'agent_unavailable_fallback' so callers can distinguish
+    real AI decisions from rule-based substitutions.
+    This is the key assertion for Step 2 of the buildathon fixes.
+    """
+    import agent_service as svc
+    original_client = svc.client
+    svc.client = None
+
+    try:
+        r = agent_client.post("/agent/decide", json=VALID_AGENT_PAYLOAD)
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+        body = r.json()
+        fallback_status = body.get("fallback_status")
+        assert fallback_status == "agent_unavailable_fallback", (
+            f"Expected fallback_status='agent_unavailable_fallback', got: {fallback_status!r}. "
+            f"This field MUST be set when the rule-based fallback is used so the dashboard "
+            f"can show the degraded-agent warning banner."
+        )
+    finally:
+        svc.client = original_client
+
+
+def test_agent_status_endpoint(agent_client):
+    """
+    GET /agent/status should return groq_available and fallback_only fields.
+    When client is None, fallback_only must be True and status must be 'degraded'.
+    """
+    import agent_service as svc
+    original_client = svc.client
+    svc.client = None
+
+    try:
+        r = agent_client.get("/agent/status")
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+        body = r.json()
+        assert body.get("groq_available") is False, \
+            f"Expected groq_available=False when client=None, got: {body.get('groq_available')}"
+        assert body.get("fallback_only") is True, \
+            f"Expected fallback_only=True when client=None, got: {body.get('fallback_only')}"
+        assert body.get("status") == "degraded", \
+            f"Expected status='degraded' when client=None, got: {body.get('status')!r}"
+    finally:
+        svc.client = original_client
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SIMULATION ENGINE FALLBACK TRACKING TESTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_simulation_fallback_detection():
+    """
+    When the agent service is unreachable (ConnectionError), ai_agent_decision()
+    must return is_fallback=True as the 4th element of its tuple.
+    This asserts the fallback banner logic fires when the agent is down.
+    """
+    import sys
+    import os
+    # Ensure project root is on path so simulation_engine can be imported
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    try:
+        import simulation_engine as sim
+        import requests
+        from unittest.mock import patch, MagicMock
+
+        sample_tx = {
+            "transaction_id": "550e8400-e29b-41d4-a716-446655440099",
+            "customer_id":    "550e8400-e29b-41d4-a716-446655440001",
+            "amount":         "1500.00",
+            "payment_method": "UPI",
+            "failure_reason_raw": "gateway_timeout",
+            "customer_ltv":   "5000.00",
+            "recent_retries": "1",
+            "time_since_last_attempt_mins": "15",
+        }
+
+        session = requests.Session()
+
+        # Patch session.post to simulate agent being unreachable
+        with patch.object(session, "post", side_effect=requests.exceptions.ConnectionError("agent down")):
+            action, summary, latency_ms, is_fallback = sim.ai_agent_decision(
+                sample_tx,
+                "http://127.0.0.1:8002",
+                session,
+            )
+
+        assert is_fallback is True, (
+            f"Expected is_fallback=True when agent is unreachable, got: {is_fallback}. "
+            f"The dashboard fallback banner requires this to be set correctly."
+        )
+        assert action in sim.RECOVERY_MATRIX or action in {"retry_now", "retry_later", "switch_method", "give_up"}, \
+            f"Expected a valid action from fallback, got: {action!r}"
+        assert "fallback" in summary.lower(), \
+            f"Expected 'fallback' in summary string, got: {summary!r}"
+
+    except ImportError as e:
+        pytest.skip(f"Could not import simulation_engine: {e}")
+

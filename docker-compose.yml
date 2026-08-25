@@ -44,7 +44,10 @@ services:
     container_name: revenue_recovery_ml_service
     environment:
       PORT: 8000
-      ALLOWED_ORIGINS: "*"
+      # IMPORTANT: Restrict to your real dashboard domain in production.
+      # Set ALLOW_INSECURE_CORS=true to allow all origins (dev only).
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      ALLOW_INSECURE_CORS: ${ALLOW_INSECURE_CORS:-false}
     ports:
       - "8000:8000"
     restart: always

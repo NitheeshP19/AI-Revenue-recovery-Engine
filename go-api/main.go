@@ -57,6 +57,11 @@ func main() {
 	ConnectDatabase()
 	slog.Info("Database ready — connection pool active")
 
+	// Ensure the Razorpay recovery actions table exists (idempotent on restart).
+	if DB != nil {
+		MigrateRazorpayTables(DB)
+	}
+
 	// ── 4. Initialise Fiber ───────────────────────────────────────────────────
 	app := fiber.New(fiber.Config{
 		AppName:      "AI Revenue Recovery API v1.0.0",
@@ -99,13 +104,23 @@ func main() {
 	}))
 
 	// CORS — permits the React dashboard (running on a different origin) to call
-	// this API. In production, restrict AllowOrigins to your actual dashboard URL.
+	// this API. Defaults to http://localhost:5173 (the Vite dev server).
+	//
+	// To open CORS to all origins for local development without a fixed origin,
+	// set ALLOW_INSECURE_CORS=true in your .env. Never do this in production.
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
 	if allowedOrigins == "" {
-		allowedOrigins = "*" // open in dev; always restrict in production
-		if appEnv == "production" {
-			slog.Warn("ALLOWED_ORIGINS is not set — CORS is open (*). Set this env var in production.")
+		if os.Getenv("ALLOW_INSECURE_CORS") == "true" {
+			allowedOrigins = "*"
+			slog.Warn("CORS is open to ALL origins (ALLOW_INSECURE_CORS=true). Do NOT use in production.")
+		} else {
+			allowedOrigins = "http://localhost:5173"
 		}
+	}
+	if allowedOrigins == "*" {
+		slog.Warn("ALLOWED_ORIGINS is set to '*' — restrict this to your dashboard domain in production.",
+			"hint", "Set ALLOWED_ORIGINS=https://your-dashboard.vercel.app",
+		)
 	}
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins,
@@ -144,6 +159,11 @@ func main() {
 	// Events sub-group
 	events := v1.Group("/events")
 	events.Post("/failure", IngestFailureEventHandler)
+
+	// Razorpay webhook receiver
+	// Verifies X-Razorpay-Signature via HMAC-SHA256 before processing.
+	webhooks := v1.Group("/webhooks")
+	webhooks.Post("/razorpay", HandleRazorpayWebhook)
 
 	// 404 catch-all — must be registered last.
 	app.Use(func(c *fiber.Ctx) error {

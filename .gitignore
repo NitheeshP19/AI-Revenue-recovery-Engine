@@ -35,6 +35,22 @@ Desktop.ini
 # ── Generated Simulation Output ───────────────────────────────────────────────
 metrics_summary.json
 
+# ── Compiled Binaries & Build Outputs ─────────────────────────────────────────
+# Go compiled binaries — regenerate with: go build -o api . (or: make dev-go)
+*.exe
+*.exe~
+go-api/api
+go-api/main
+
+# ── ML Model Artifacts ────────────────────────────────────────────────────────
+# classifier.json is a large (7.5 MB) XGBoost artifact regenerable with:
+#   make train   OR   cd ml && python train_model.py
+# Do NOT commit it. Use Git LFS if you must version it.
+ml/classifier.json
+
 # ── Local scratch / IDE artifacts ─────────────────────────────────────────────
 scratch/
 walkthrough.md
+
+# Raw screenshots at root level (already copied to assets/)
+Screenshot*.png

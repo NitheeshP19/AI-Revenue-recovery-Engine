@@ -1,9 +1,13 @@
-﻿package main
+package main
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,6 +19,7 @@ func newTestApp() *fiber.App {
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Get("/health", HealthHandler)
 	app.Post("/api/v1/events/failure", IngestFailureEventHandler)
+	app.Post("/api/v1/webhooks/razorpay", HandleRazorpayWebhook)
 	return app
 }
 
@@ -191,5 +196,149 @@ func TestPtrStr(t *testing.T) {
 	got := ptrStr("hello")
 	if got == nil || *got != "hello" {
 		t.Error(`ptrStr("hello") should return pointer to "hello"`)
+	}
+}
+
+// =============================================================================
+//  POST /api/v1/webhooks/razorpay — Signature verification integration tests
+// =============================================================================
+
+// razorpayTestPayload returns a minimal but valid Razorpay payment.failed body.
+func razorpayTestPayload() []byte {
+	p := map[string]interface{}{
+		"entity":     "event",
+		"account_id": "acc_test123",
+		"event":      "payment.failed",
+		"contains":   []string{"payment"},
+		"payload": map[string]interface{}{
+			"payment": map[string]interface{}{
+				"entity": map[string]interface{}{
+					"id":              "pay_TestPaymentID001",
+					"entity":          "payment",
+					"amount":          150000,
+					"currency":        "INR",
+					"status":          "failed",
+					"order_id":        "order_TestOrderID001",
+					"method":          "upi",
+					"email":           "test@example.com",
+					"error_code":      "BAD_REQUEST_ERROR",
+					"error_reason":    "payment_failed",
+					"error_source":    "customer",
+					"created_at":      1724600000,
+				},
+			},
+		},
+	}
+	b, _ := json.Marshal(p)
+	return b
+}
+
+// signPayload creates an HMAC-SHA256 signature matching Razorpay's algorithm.
+func signPayload(body []byte, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// TestRazorpayWebhook_ValidSignature verifies that a correctly signed payload
+// is accepted with HTTP 200 and status "accepted" or "missing_payment_payload".
+func TestRazorpayWebhook_ValidSignature(t *testing.T) {
+	const testSecret = "test-webhook-secret-abc123"
+	os.Setenv("RAZORPAY_WEBHOOK_SECRET", testSecret)
+	defer os.Unsetenv("RAZORPAY_WEBHOOK_SECRET")
+
+	DB = nil // DB not required for signature verification test
+	app := newTestApp()
+
+	body := razorpayTestPayload()
+	sig := signPayload(body, testSecret)
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/razorpay", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Razorpay-Signature", sig)
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusOK {
+		t.Errorf("valid signature: want 200, got %d", resp.StatusCode)
+	}
+
+	var body2 map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&body2)
+	status, _ := body2["status"].(string)
+	if status != "accepted" && status != "missing_payment_payload" {
+		t.Errorf("want status='accepted', got %q", status)
+	}
+}
+
+// TestRazorpayWebhook_InvalidSignature verifies that a tampered/wrong signature
+// returns HTTP 400 with error code INVALID_SIGNATURE.
+func TestRazorpayWebhook_InvalidSignature(t *testing.T) {
+	const testSecret = "test-webhook-secret-abc123"
+	os.Setenv("RAZORPAY_WEBHOOK_SECRET", testSecret)
+	defer os.Unsetenv("RAZORPAY_WEBHOOK_SECRET")
+
+	DB = nil
+	app := newTestApp()
+
+	body := razorpayTestPayload()
+	// Use a deliberately wrong signature.
+	wrongSig := signPayload(body, "wrong-secret-that-wont-match")
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/razorpay", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Razorpay-Signature", wrongSig)
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Errorf("invalid signature: want 400, got %d", resp.StatusCode)
+	}
+
+	var errBody ErrorResponse
+	json.NewDecoder(resp.Body).Decode(&errBody)
+	if errBody.Error != "INVALID_SIGNATURE" {
+		t.Errorf("want error='INVALID_SIGNATURE', got %q", errBody.Error)
+	}
+}
+
+// TestRazorpayWebhook_MissingSignature verifies that a request without any
+// X-Razorpay-Signature header returns HTTP 400.
+func TestRazorpayWebhook_MissingSignature(t *testing.T) {
+	const testSecret = "test-webhook-secret-abc123"
+	os.Setenv("RAZORPAY_WEBHOOK_SECRET", testSecret)
+	defer os.Unsetenv("RAZORPAY_WEBHOOK_SECRET")
+
+	DB = nil
+	app := newTestApp()
+
+	body := razorpayTestPayload()
+
+	// Send with no X-Razorpay-Signature header at all.
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/razorpay", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Errorf("missing signature: want 400, got %d", resp.StatusCode)
+	}
+
+	var errBody ErrorResponse
+	json.NewDecoder(resp.Body).Decode(&errBody)
+	if errBody.Error != "INVALID_SIGNATURE" {
+		t.Errorf("want error='INVALID_SIGNATURE', got %q", errBody.Error)
 	}
 }

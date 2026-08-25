@@ -181,14 +181,19 @@ def ai_agent_decision(
     transaction: dict,
     agent_url: str,
     session: requests.Session,
-) -> Tuple[str, str, int]:
+) -> Tuple[str, str, int, bool]:
     """
     Calls the Phase 4 Groq Agent microservice to get a structured recovery decision.
 
     Returns:
-        (action, reasoning_summary, latency_ms)
+        (action, reasoning_summary, latency_ms, is_fallback)
 
-    On any HTTP/connection error, falls back to rule_based_decision and logs a warning.
+    is_fallback is True when:
+      - The HTTP call itself fails (connection/timeout)
+      - The agent returns HTTP non-200
+      - The agent's response contains fallback_status == "agent_unavailable_fallback"
+
+    On any error, falls back to rule_based_decision and sets is_fallback=True.
     """
     payload = {
         "job_id":            f"sim_{transaction['transaction_id']}",
@@ -238,18 +243,28 @@ def ai_agent_decision(
             summary = (
                 data.get("reasoning_trace", {}).get("summary", "AI decision")
             )
-            return action, summary, latency_ms
+            # Detect fallback: agent returned a decision but flagged it as heuristic.
+            is_fallback = data.get("fallback_status") == "agent_unavailable_fallback"
+            if is_fallback:
+                log.warning(
+                    f"Agent returned fallback decision for {transaction['transaction_id']} "
+                    f"(fallback_status=agent_unavailable_fallback). "
+                    f"This will be counted in the fallback bucket, not the AI headline rate."
+                )
+            return action, summary, latency_ms, is_fallback
         else:
             log.warning(f"Agent returned HTTP {resp.status_code} for {transaction['transaction_id']} — using fallback")
 
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
         latency_ms = int((time.perf_counter() - t_start) * 1000)
         log.warning(f"Agent unreachable ({e.__class__.__name__}) — using rule-based fallback")
+        fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
+        return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True
 
-    # Graceful fallback: rule-based heuristic
-    fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
+    # Graceful fallback for non-200 responses.
     latency_ms = int((time.perf_counter() - t_start) * 1000)
-    return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms
+    fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
+    return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -272,6 +287,9 @@ class TransactionResult:
     ai_recovered:      bool
     ai_reasoning_trace: str
     ai_latency_ms:     int
+    # True when the AI decision was actually made by the heuristic fallback,
+    # not the real Groq LLM. Affects headline metrics reporting.
+    ai_is_fallback:    bool = False
 
 
 @dataclass
@@ -428,8 +446,9 @@ def run_simulation(
             ai_action    = rule_based_decision(amount, retries)
             ai_summary   = "Offline mode — heuristic applied"
             ai_latency   = 0
+            ai_is_fallback = True  # offline mode is always a fallback
         else:
-            ai_action, ai_summary, ai_latency = ai_agent_decision(tx, agent_url, session)
+            ai_action, ai_summary, ai_latency, ai_is_fallback = ai_agent_decision(tx, agent_url, session)
             # Throttle to respect Groq's 30 RPM rate limit (2s gap = ~30 req/min)
             time.sleep(AGENT_REQUEST_DELAY_SEC)
 
@@ -446,6 +465,7 @@ def run_simulation(
             ai_recovered       = ai_recovered,
             ai_reasoning_trace = ai_summary,
             ai_latency_ms      = ai_latency,
+            ai_is_fallback     = ai_is_fallback,
         ))
 
         if i % 25 == 0 or i == total:
@@ -456,6 +476,22 @@ def run_simulation(
     session.close()
 
     # ── 4. Metrics computation ────────────────────────────────────────────────
+    # Separate genuine AI decisions from fallback-affected ones.
+    genuine_ai_results  = [r for r in results if not r.ai_is_fallback]
+    fallback_results    = [r for r in results if r.ai_is_fallback]
+    fallback_count      = len(fallback_results)
+    fallback_rate_pct   = round(fallback_count / total * 100, 2) if total > 0 else 0.0
+
+    if fallback_count > 0:
+        log.warning(
+            f"\n{'=' * 60}\n"
+            f"  ⚠️  AGENT DEGRADED — FALLBACK DETECTED\n"
+            f"  {fallback_count}/{total} decisions ({fallback_rate_pct:.1f}%) used the heuristic fallback.\n"
+            f"  These are reported in a separate 'fallback_bucket' in the JSON\n"
+            f"  and EXCLUDED from the headline AI recovery rate.\n"
+            f"{'=' * 60}"
+        )
+
     rule_metrics = compute_metrics(
         name          = "Rule-Based (Heuristic Baseline)",
         results       = results,
@@ -466,22 +502,33 @@ def run_simulation(
     # Override rule latency to ~0ms (pure in-process computation)
     rule_metrics.avg_latency_ms = 0.5
 
+    # AI metrics computed on GENUINE AI decisions only (fallbacks excluded).
     ai_metrics = compute_metrics(
-        name          = "AI Agent (Groq + Llama-3)",
-        results       = results,
+        name          = "AI Agent (Groq + Llama-3) — Genuine Decisions",
+        results       = genuine_ai_results if genuine_ai_results else results,
         action_key    = "ai_action",
         recovered_key = "ai_recovered",
         latency_key   = "ai_latency_ms",
     )
 
+    # Fallback bucket metrics (for separate reporting).
+    fallback_metrics = compute_metrics(
+        name          = "Fallback (Heuristic — Groq Unavailable)",
+        results       = fallback_results if fallback_results else [],
+        action_key    = "ai_action",
+        recovered_key = "ai_recovered",
+        latency_key   = "ai_latency_ms",
+    ) if fallback_results else None
+
     revenue_lift  = compute_revenue_lift(ai_metrics.revenue_recovered, rule_metrics.revenue_recovered)
     recovery_lift = compute_recovery_lift(ai_metrics.recovery_rate_pct, rule_metrics.recovery_rate_pct)
 
     log.info("\n" + "=" * 60)
-    log.info("  BENCHMARK RESULTS")
+    log.info("  BENCHMARK RESULTS (simulated projection)")
     log.info("=" * 60)
     log.info(f"  Rule-Based  | Recovery: {rule_metrics.recovery_rate_pct}% | Revenue: ₹{rule_metrics.revenue_recovered:,.2f}")
     log.info(f"  AI Agent    | Recovery: {ai_metrics.recovery_rate_pct}% | Revenue: ₹{ai_metrics.revenue_recovered:,.2f}")
+    log.info(f"  Fallbacks   | Count: {fallback_count} ({fallback_rate_pct:.1f}%) — excluded from AI headline")
     log.info(f"  Revenue Lift (AI vs Rule): {revenue_lift:+.2f}%")
     log.info(f"  Recovery Lift (AI vs Rule): {recovery_lift:+.2f} pp")
     log.info("=" * 60)
@@ -534,6 +581,15 @@ def run_simulation(
             "random_seed":      RANDOM_SEED,
             "agent_url":        agent_url if not offline else "offline",
             "schema_version":   "1.0.0",
+            # Fallback tracking: surface to dashboard for degraded-agent banner.
+            "fallback_count":     fallback_count,
+            "fallback_rate_pct": fallback_rate_pct,
+            "agent_degraded":    fallback_count > 0,
+            "methodology_note":  (
+                "Simulated projection based on a modeled outcome-probability matrix. "
+                "failed_transactions.csv is synthetically generated. "
+                "simulate_recovery_outcome() uses hand-authored probabilities, not real payment outcomes."
+            ),
         },
 
         # KPI Cards
@@ -569,7 +625,21 @@ def run_simulation(
                 "revenue_recovered": ai_metrics.revenue_recovered,
                 "avg_latency_ms":    ai_metrics.avg_latency_ms,
                 "action_breakdown":  ai_metrics.action_breakdown,
+                "note": "Headline rate excludes fallback-affected transactions. See fallback_bucket.",
             },
+            # Transactions where Groq was unavailable — decisions made by heuristic.
+            # These are NEVER included in the headline AI recovery rate.
+            "fallback_bucket": (
+                {
+                    "name":              fallback_metrics.name,
+                    "total_transactions": fallback_metrics.total_transactions,
+                    "recovered_count":   fallback_metrics.recovered_count,
+                    "recovery_rate_pct": fallback_metrics.recovery_rate_pct,
+                    "revenue_recovered": fallback_metrics.revenue_recovered,
+                    "action_breakdown":  fallback_metrics.action_breakdown,
+                    "warning": "These decisions were made by the rule-based fallback. Agent was unavailable.",
+                } if fallback_metrics else None
+            ),
         },
 
         # Per-failure-reason breakdown (for Recharts grouped bar chart)

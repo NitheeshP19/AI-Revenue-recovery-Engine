@@ -475,6 +475,12 @@ export default function RevenueRecoveryDashboard() {
   const metrics = MOCK_METRICS;
   const { kpis, strategies, failure_reason_breakdown, meta } = metrics;
 
+  // Fallback banner state — shown when agent was degraded during simulation
+  const fallbackCount  = meta.fallback_count   ?? 0;
+  const agentDegraded  = meta.agent_degraded   ?? false;
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const showDegradedBanner = agentDegraded && !bannerDismissed;
+
   // Live feed state
   const [feedEvents, setFeedEvents] = useState(() =>
     MOCK_METRICS.failure_reason_breakdown.slice(0, 3).map((_, i) => ({
@@ -562,13 +568,45 @@ export default function RevenueRecoveryDashboard() {
           </div>
         </motion.header>
 
+        {/* ── DEGRADED AGENT BANNER ────────────────────────────────────── */}
+        {showDegradedBanner && (
+          <motion.div
+            id="agent-degraded-banner"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="mb-6 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 backdrop-blur-md px-4 py-3"
+          >
+            <span className="text-amber-400 text-lg leading-none mt-0.5">⚠️</span>
+            <div className="flex-1">
+              <p className="text-amber-300 font-semibold text-sm">
+                Agent Degraded — Showing Heuristic Result for {fallbackCount} of {meta.sample_size} decisions
+              </p>
+              <p className="text-amber-400/70 text-xs mt-0.5">
+                Groq was unavailable for {fallbackCount} transaction{fallbackCount !== 1 ? "s" : ""}.
+                These used the rule-based fallback and are{" "}
+                <strong>excluded</strong> from the headline AI recovery rate — they appear in a separate{" "}
+                <code className="text-amber-300 bg-amber-500/10 px-1 rounded">fallback_bucket</code> in metrics_summary.json.
+              </p>
+            </div>
+            <button
+              id="dismiss-degraded-banner"
+              onClick={() => setBannerDismissed(true)}
+              className="text-amber-500/60 hover:text-amber-300 text-xs ml-2 mt-0.5 transition-colors"
+              aria-label="Dismiss degraded banner"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+
         {/* ── KPI CARDS ────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
           <KpiCard
             icon={DollarSign}
-            label="Total Revenue Recovered"
+            label="AI Revenue Recovered (Simulated)"
             value={<AnimatedCounter target={totalRevenue} prefix="$" decimals={2} />}
-            sub={`vs $${kpis.rule_revenue_recovered.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} rule-based`}
+            sub={`Simulated projection vs $${kpis.rule_revenue_recovered.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} rule-based`}
             accent="emerald"
             badge={`+${kpis.revenue_lift_pct}%`}
             delay={0.1}
@@ -598,6 +636,27 @@ export default function RevenueRecoveryDashboard() {
             accent="amber"
             delay={0.3}
           />
+        </div>
+
+        {/* ── METHODOLOGY DISCLAIMER ──────────────────────────────────── */}
+        <div
+          id="methodology-disclaimer"
+          className="mb-8 flex items-center gap-2 text-xs text-slate-500 border border-slate-800 rounded-lg px-3 py-2 bg-slate-900/50 w-fit"
+        >
+          <span className="text-slate-400">📊</span>
+          <span>
+            <strong className="text-slate-400">Simulated projection</strong> — outcome probabilities are model-based
+            (<code className="text-slate-400">RECOVERY_MATRIX</code>), not empirically measured.
+            Data from synthetic <code className="text-slate-400">failed_transactions.csv</code>.{" "}
+            <a
+              href="https://github.com/NitheeshP19/AI-Revenue-recovery-Engine#-methodology--limitations"
+              target="_blank"
+              rel="noreferrer"
+              className="text-slate-400 underline underline-offset-2 hover:text-slate-200 transition-colors"
+            >
+              See methodology →
+            </a>
+          </span>
         </div>
 
         {/* ── CHARTS ROW ───────────────────────────────────────────────── */}
