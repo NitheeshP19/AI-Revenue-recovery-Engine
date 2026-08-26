@@ -214,6 +214,7 @@ class DecisionResponse(BaseModel):
     decided_at:        str
     decision:          str  # retry_now | retry_later | switch_method | give_up
     confidence_score:  float
+    action_rationale:  str
     action_parameters: ActionParameters
     reasoning_trace:   ReasoningTrace
     # Populated ONLY when the LLM agent was unavailable and the response was
@@ -265,6 +266,7 @@ def make_fallback_response(request: DecisionRequest, reason: str) -> DecisionRes
         decided_at        = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         decision          = decision,
         confidence_score  = 0.5000,
+        action_rationale  = "Fallback: Groq unavailable, defaulting to rule-based retry",
         action_parameters = ActionParameters(
             recommended_retry_delay_mins = delay if decision == "retry_later" else None,
             recommended_channel          = channel,
@@ -410,6 +412,7 @@ You MUST output your decision in strict JSON format matching this exact schema:
 {{
   "decision": "retry_now" | "retry_later" | "switch_method" | "give_up",
   "confidence_score": <float between 0.0 and 1.0>,
+  "action_rationale": "<a one-sentence plain-English explanation of why this action was chosen>",
   "action_parameters": {{
     "recommended_retry_delay_mins": <integer retry delay in minutes, or null>,
     "recommended_channel": <string name of payment method to switch to, or null>,
@@ -506,6 +509,7 @@ Return ONLY the JSON payload, without markdown code fences or conversational tex
             decided_at        = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             decision          = decision_data.get("decision", "retry_later"),
             confidence_score  = round(float(decision_data.get("confidence_score", 0.5)), 4),
+            action_rationale  = decision_data.get("action_rationale", "AI decided recovery action based on payment failure characteristics."),
             action_parameters = ActionParameters(
                 recommended_retry_delay_mins = action_params.get("recommended_retry_delay_mins"),
                 recommended_channel          = action_params.get("recommended_channel"),

@@ -53,6 +53,9 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+import audit_logger
+import stopping_rules
+
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level   = logging.INFO,
@@ -136,10 +139,10 @@ def simulate_recovery_outcome(failure_reason: str, action: str) -> bool:
     Probabilistic outcome simulation. Returns True (recovered) or False (failed).
 
     Draws from the stochastic RECOVERY_MATRIX using the canonical failure_reason.
-    Any 'give_up' action unconditionally returns False (no recovery attempted).
+    Any 'give_up' or 'abandon' action unconditionally returns False (no recovery attempted).
     Unknown failure_reason values are handled by the 'unknown' bucket.
     """
-    if action == "give_up":
+    if action in ("give_up", "abandon"):
         return False
 
     # Normalize to known bucket
@@ -181,12 +184,12 @@ def ai_agent_decision(
     transaction: dict,
     agent_url: str,
     session: requests.Session,
-) -> Tuple[str, str, int, bool]:
+) -> Tuple[str, str, int, bool, str]:
     """
     Calls the Phase 4 Groq Agent microservice to get a structured recovery decision.
 
     Returns:
-        (action, reasoning_summary, latency_ms, is_fallback)
+        (action, reasoning_summary, latency_ms, is_fallback, action_rationale)
 
     is_fallback is True when:
       - The HTTP call itself fails (connection/timeout)
@@ -251,7 +254,8 @@ def ai_agent_decision(
                     f"(fallback_status=agent_unavailable_fallback). "
                     f"This will be counted in the fallback bucket, not the AI headline rate."
                 )
-            return action, summary, latency_ms, is_fallback
+            action_rationale = data.get("action_rationale", "AI decided recovery action based on payment failure characteristics.")
+            return action, summary, latency_ms, is_fallback, action_rationale
         else:
             log.warning(f"Agent returned HTTP {resp.status_code} for {transaction['transaction_id']} — using fallback")
 
@@ -259,12 +263,12 @@ def ai_agent_decision(
         latency_ms = int((time.perf_counter() - t_start) * 1000)
         log.warning(f"Agent unreachable ({e.__class__.__name__}) — using rule-based fallback")
         fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
-        return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True
+        return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True, "Fallback: Groq unavailable, defaulting to rule-based retry"
 
     # Graceful fallback for non-200 responses.
     latency_ms = int((time.perf_counter() - t_start) * 1000)
     fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
-    return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True
+    return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True, "Fallback: Groq unavailable, defaulting to rule-based retry"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -420,6 +424,14 @@ def run_simulation(
     log.info(f"  Agent URL   : {'[OFFLINE MODE]' if offline else agent_url}")
     log.info("=" * 60)
 
+    # Clear audit log at the start of simulation run to ensure clean log for this run
+    try:
+        log_file = BASE_DIR / "audit_log.jsonl"
+        if log_file.exists():
+            log_file.unlink()
+    except Exception as e:
+        log.warning(f"Could not clear audit log file: {e}")
+
     # ── 1. Data loading ───────────────────────────────────────────────────────
     transactions = load_transactions(CSV_PATH, sample_size)
 
@@ -436,23 +448,47 @@ def run_simulation(
         amount         = float(tx["amount"])
         failure_reason = tx["failure_reason_raw"]
         retries        = int(tx["recent_retries"])
+        ltv            = float(tx["customer_ltv"])
 
         # Strategy A: Rule-Based Heuristic (no latency — pure computation)
         rule_action    = rule_based_decision(amount, retries)
         rule_recovered = simulate_recovery_outcome(failure_reason, rule_action)
 
-        # Strategy B: AI Agent (or offline fallback)
-        if offline:
-            ai_action    = rule_based_decision(amount, retries)
-            ai_summary   = "Offline mode — heuristic applied"
-            ai_latency   = 0
-            ai_is_fallback = True  # offline mode is always a fallback
-        else:
-            ai_action, ai_summary, ai_latency, ai_is_fallback = ai_agent_decision(tx, agent_url, session)
-            # Throttle to respect Groq's 30 RPM rate limit (2s gap = ~30 req/min)
-            time.sleep(AGENT_REQUEST_DELAY_SEC)
+        # Check stopping rules for Strategy B
+        rule_check = stopping_rules.check_stopping_rules(
+            transaction_id            = tx["transaction_id"],
+            retry_attempt             = retries,
+            customer_ltv              = ltv,
+            amount                    = amount,
+            failure_reason            = failure_reason,
+            hours_since_first_failure = 24.0
+        )
 
-        ai_recovered = simulate_recovery_outcome(failure_reason, ai_action)
+        should_stop = rule_check["should_stop"]
+        stopping_rule_triggered = rule_check["rule_triggered"]
+
+        if should_stop:
+            ai_action = "abandon"
+            ai_summary = rule_check["reason"]
+            ai_latency = 0
+            ai_is_fallback = False
+            action_rationale = rule_check["reason"]
+            ai_recovered = False
+        else:
+            stopping_rule_triggered = None
+            # Strategy B: AI Agent (or offline fallback)
+            if offline:
+                ai_action    = rule_based_decision(amount, retries)
+                ai_summary   = "Offline mode — heuristic applied"
+                ai_latency   = 0
+                ai_is_fallback = True  # offline mode is always a fallback
+                action_rationale = "Offline mode: heuristic applied"
+            else:
+                ai_action, ai_summary, ai_latency, ai_is_fallback, action_rationale = ai_agent_decision(tx, agent_url, session)
+                # Throttle to respect Groq's 30 RPM rate limit (2s gap = ~30 req/min)
+                time.sleep(AGENT_REQUEST_DELAY_SEC)
+
+            ai_recovered = simulate_recovery_outcome(failure_reason, ai_action)
 
         results.append(TransactionResult(
             transaction_id     = tx["transaction_id"],
@@ -467,6 +503,24 @@ def run_simulation(
             ai_latency_ms      = ai_latency,
             ai_is_fallback     = ai_is_fallback,
         ))
+
+        # Log decision to audit trail
+        audit_entry = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "transaction_id": tx["transaction_id"],
+            "amount": amount,
+            "failure_reason": failure_reason,
+            "root_cause_predicted": failure_reason,
+            "root_cause_confidence": 1.0,
+            "customer_ltv": ltv,
+            "retry_attempt": retries,
+            "action_chosen": ai_action,
+            "action_rationale": action_rationale,
+            "stopping_rule_triggered": stopping_rule_triggered,
+            "outcome": "recovered" if ai_recovered else "unrecoverable",
+            "revenue_recovered": amount if ai_recovered else 0.0
+        }
+        audit_logger.log_decision(audit_entry)
 
         if i % 25 == 0 or i == total:
             rule_so_far = sum(1 for r in results if r.rule_recovered)
@@ -681,8 +735,8 @@ def main():
     )
     args = parser.parse_args()
 
-    # Clamp sample size
-    sample_size = max(100, min(500, args.sample))
+    # Clamp sample size (allow down to 1 for sanity checking)
+    sample_size = max(1, min(500, args.sample))
 
     summary = run_simulation(
         sample_size = sample_size,
@@ -694,6 +748,9 @@ def main():
     out_path = Path(args.output)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
+
+    # Write audit summary
+    audit_logger.write_summary(summary)
 
     log.info(f"\n✅ Metrics exported → {out_path}")
     log.info(f"   Total transactions simulated: {summary['meta']['sample_size']}")

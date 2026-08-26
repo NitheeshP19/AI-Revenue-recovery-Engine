@@ -34,6 +34,8 @@ Desktop.ini
 
 # ── Generated Simulation Output ───────────────────────────────────────────────
 metrics_summary.json
+audit_log.jsonl
+audit_summary.json
 
 # ── Compiled Binaries & Build Outputs ─────────────────────────────────────────
 # Go compiled binaries — regenerate with: go build -o api . (or: make dev-go)

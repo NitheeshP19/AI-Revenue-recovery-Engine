@@ -48,6 +48,49 @@ When evaluating 200 synthetically-generated failed payments side-by-side:
 
 ---
 
+## 🛑 Stopping Rules & Compliance
+
+The recovery agent does not retry indefinitely. Before any recovery action
+is attempted, `stopping_rules.py` evaluates each transaction against four
+compliance gates in priority order:
+
+| Rule | Condition | Outcome |
+|---|---|---|
+| MAX_RETRIES | retry_attempt ≥ 3 | Mark unrecoverable |
+| LOW_LTV_LOW_AMOUNT | LTV < ₹500 AND amount < ₹200 | Mark unrecoverable (not cost-effective) |
+| TIMEOUT_48H | > 48 hours since first failure | Escalate to manual review queue |
+| PERMANENT_FAILURE | card_stolen / fraud_block / account_closed / card_expired | Immediate stop, no retry |
+
+If any rule fires, the agent call is skipped entirely and the decision is
+recorded in `audit_log.jsonl` with the triggering rule name.
+
+---
+
+## 📋 Audit Trail
+
+Every recovery decision — whether by the rule-based heuristic or the Groq AI
+agent — is logged to `audit_log.jsonl` in the root directory. Each line is a
+JSON object recording:
+
+- Transaction ID, amount, failure reason
+- XGBoost root cause prediction + confidence score
+- Customer LTV and retry attempt number
+- Action chosen and one-line agent rationale
+- Which stopping rule fired (if any)
+- Final outcome: `recovered` | `unrecoverable` | `pending`
+- Revenue recovered
+
+Run `python simulation_engine.py --sample 30` to generate a fresh audit log.
+The `audit_summary.json` file contains the aggregated run totals.
+
+This audit trail satisfies Razorpay's compliance requirement for bounded,
+explainable, and auditable AI-driven financial recovery actions.
+
+> `audit_log.jsonl` is git-ignored (runtime output).
+> Run the simulation to generate it locally.
+
+---
+
 ## 🔗 Razorpay Integration
 
 The Go API implements a **real, production-grade Razorpay webhook receiver**:

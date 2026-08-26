@@ -268,7 +268,7 @@ def test_simulation_fallback_detection():
 
         # Patch session.post to simulate agent being unreachable
         with patch.object(session, "post", side_effect=requests.exceptions.ConnectionError("agent down")):
-            action, summary, latency_ms, is_fallback = sim.ai_agent_decision(
+            action, summary, latency_ms, is_fallback, rationale = sim.ai_agent_decision(
                 sample_tx,
                 "http://127.0.0.1:8002",
                 session,
