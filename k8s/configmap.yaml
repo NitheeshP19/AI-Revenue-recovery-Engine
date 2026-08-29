@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: airevrecovery
+  labels:
+    app.kubernetes.io/name: ai-revenue-recovery
+    app.kubernetes.io/part-of: ai-revenue-recovery
+data:
+  APP_ENV: "production"
+  PORT: "8080"
+  ML_PORT: "8001"
+  AGENT_PORT: "8002"
+  # CORS: set to your actual dashboard domain.
+  # ALLOWED_ORIGINS=* must NEVER be used here.
+  ALLOWED_ORIGINS: "https://ai-revenue-recovery-engine-git-main-nitheeshps-projects.vercel.app"
+  ALLOW_INSECURE_CORS: "false"
+  # ML/Agent service URLs for inter-pod communication (ClusterIP DNS)
+  ML_SERVICE_URL: "http://ml-inference-svc:8001"
+  AGENT_SERVICE_URL: "http://agent-svc:8002"

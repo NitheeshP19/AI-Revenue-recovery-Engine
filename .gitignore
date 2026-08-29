@@ -37,6 +37,13 @@ metrics_summary.json
 audit_log.jsonl
 audit_summary.json
 
+# ── Synthetic / Data Files (regenerate with synthetic_data_generator.py) ───────
+# Do NOT commit training data CSVs — they are large and reproducible.
+data/*.csv
+data/*.json
+# Legacy root-level CSV (moved to data/ — still ignore if anyone recreates it)
+failed_transactions.csv
+
 # ── Compiled Binaries & Build Outputs ─────────────────────────────────────────
 # Go compiled binaries — regenerate with: go build -o api . (or: make dev-go)
 *.exe

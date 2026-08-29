@@ -4,7 +4,7 @@
 #  install via `choco install make` or `winget install GnuWin32.Make` on Windows).
 # ==============================================================================
 
-.PHONY: help train test dev-go dev-ml dev-dashboard docker-up docker-down lint clean
+.PHONY: help train test test-go test-python test-dashboard dev-go dev-ml dev-dashboard docker-up docker-down lint ci clean
 
 # ── Default target: show help ─────────────────────────────────────────────────
 help:
@@ -70,10 +70,15 @@ docker-up:
 docker-down:
 	docker compose down --remove-orphans
 
-# ── Linting ───────────────────────────────────────────────────────────────────
+# ── Linting & CI ─────────────────────────────────────────────────────────────
 lint:
 	cd go-api && go vet ./...
 	cd dashboard && npm run lint
+
+ci: lint test
+	@echo "======================================================"
+	@echo "  ✅ ALL CI CHECKS (LINT + TESTS) PASSED"
+	@echo "======================================================"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 clean:

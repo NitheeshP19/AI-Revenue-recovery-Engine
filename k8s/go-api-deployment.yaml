@@ -1,0 +1,72 @@
+---
+# ==============================================================================
+#  Go Ingestion API — Deployment
+# ==============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-api
+  namespace: airevrecovery
+  labels:
+    app: go-api
+    app.kubernetes.io/component: ingestion-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-api
+  template:
+    metadata:
+      labels:
+        app: go-api
+    spec:
+      containers:
+        - name: go-api
+          image: ghcr.io/nitheeshp19/ai-revenue-recovery/go-api:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+---
+# ==============================================================================
+#  Go Ingestion API — ClusterIP Service
+# ==============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-api-svc
+  namespace: airevrecovery
+  labels:
+    app: go-api
+spec:
+  selector:
+    app: go-api
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

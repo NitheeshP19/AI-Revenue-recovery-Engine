@@ -44,7 +44,7 @@ print(f"Pandas  version : {pd.__version__}")
 # ── 1. Configuration ───────────────────────────────────────────────────────────
 
 SEED       = 42
-CSV_PATH   = "failed_transactions.csv"   # upload to Colab before running
+CSV_PATH   = "../data/failed_transactions.csv"   # lives in data/ — regenerate with synthetic_data_generator.py if missing
 TEST_SIZE  = 0.20
 N_CV_FOLDS = 5
 

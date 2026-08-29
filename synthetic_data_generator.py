@@ -32,7 +32,7 @@ from pathlib import Path
 np.random.seed(42)
 
 N = 5_000
-OUTPUT_FILE = Path(__file__).parent / "failed_transactions.csv"
+OUTPUT_FILE = Path(__file__).parent.parent / "data" / "failed_transactions.csv"
 
 # ── Constants / Mappings ───────────────────────────────────────────────────────
 PAYMENT_METHODS = ["UPI", "Credit Card", "Debit Card"]

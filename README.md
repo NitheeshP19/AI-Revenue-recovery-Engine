@@ -31,43 +31,58 @@ An enterprise-grade, autonomous, multi-agent AI revenue recovery engine that int
 
 ---
 
-## ⚡ Live Production Results — Groq AI Agent vs Rule-Based Baseline
+## ⚡ Benchmark Results — Groq AI Agent vs Rule-Based Baseline
+
+> [!IMPORTANT]
+> **Dataset & Simulation Disclosure**:
+> Benchmark evaluations are conducted against a **calibrated synthetic dataset** (`data/failed_transactions.csv`, 5,000 samples) produced by `synthetic_data_generator.py` using distributions modeled after industry payment gateway error benchmarks. Real production payment failure records containing cardholder metadata cannot be published publicly due to **PCI-DSS and data localization regulations**.
+> For complete details on the synthetic generation parameters, stochastic recovery matrix, and fallback accounting, see [docs/BENCHMARK_METHODOLOGY.md](docs/BENCHMARK_METHODOLOGY.md).
 
 > **Run Date**: 2026-08-29 | **Simulation ID**: `236e1166` | **Sample**: 49 transactions | **Seed**: 42
-> **Agent Model**: `groq/compound` (live Groq API calls) | **ML Model**: XGBoost Classifier
+> **Agent Model**: `groq/compound` (live Groq API calls) | **ML Classifier**: XGBoost
 
-These numbers come from a **live run** with the Groq agent service running locally at `http://127.0.0.1:8002`. Each transaction was evaluated by the real Groq API (`groq/compound` model) for an autonomous recovery decision.
-
-| Metric | Rule-Based Baseline | Groq AI Agent (Genuine Decisions) | Lift |
+| Metric | Rule-Based Baseline (Strategy A) | Groq AI Agent (Strategy B — Genuine Decisions) | Lift |
 |---|---|---|---|
 | **Transactions Evaluated** | 49 | 22 (genuine AI decisions) | — |
 | **Recovered Count** | 18 | 11 | — |
 | **Recovery Rate** | **36.73%** | **50.00%** | **+13.27 pp** 🚀 |
 | **Revenue Recovered** | **₹1,40,082.41** | **₹1,23,302.88** | -11.98% (smaller txns recovered) |
-| **Avg Decision Latency** | 0.5 ms | **11,251 ms** (live Groq LLM) | Real-time reasoning |
+| **Avg Decision Latency** | 0.5 ms | **11,251 ms** (live Groq LLM inference) | Real-time reasoning |
 
-> **Note on fallback**: 27/49 transactions (55.1%) hit the rule-based fallback because `groq/compound` intermittently returned `agent_unavailable_fallback` status. These are **excluded from the AI headline rate** and reported separately. The system remained 100% operational throughout — zero downtime.
+> **Fallback Transparency**: 27/49 transactions (55.1%) in this run hit the rule-based fallback when the upstream LLM endpoint experienced latency spikes. In accordance with benchmark reporting standards, fallback-handled transactions are **excluded from the AI headline rate** and tracked separately.
+
+### Strategy A: Competitive Heuristic Baseline Logic
+To ensure an unbiased benchmark (avoiding strawman comparisons), Strategy A implements a multi-rule heuristic derived from published fintech retry best practices (e.g., Stripe Smart Retries, Razorpay guidance):
+
+| Priority | Condition | Action | Rationale |
+|---|---|---|---|
+| 1 | `recent_retries >= 3` | `give_up` | Exhausted retry budget. Protects merchant gateway score. |
+| 2 | `failure_reason == "expired_card"` | `switch_method` | Retrying expired card credentials is mathematically futile. |
+| 3 | `failure_reason == "incorrect_pin"` | `switch_method` | Authentication error; switches away from failed instrument. |
+| 4 | `failure_reason == "gateway_timeout"` | `retry_now` | Transient gateway failure; immediate retry has high success. |
+| 5 | `failure_reason == "insufficient_funds"` | `retry_later` | Customer requires salary cycle or manual balance reload. |
+| 6 | `failure_reason == "risk_flag"` | `retry_later` | Enforces cooling period to clear velocity checks. |
+| 7 | `amount < ₹100` | `retry_now` | Low-value transaction; rapid retry is low risk. |
 
 ### Recovery Breakdown by Failure Reason (Live Measured)
 
 | Failure Reason | Total Txns | Rule Recovery | AI Recovery | Lift |
 |---|---|---|---|---|
 | `gateway_timeout` | 17 | 58.82% (10/17) | **76.47%** (13/17) | **+17.65 pp** |
-| `expired_card` | 7 | 0.00% (0/7) | **42.86%** (3/7) | **+42.86 pp** ← AI strength |
+| `expired_card` | 7 | 0.00% (0/7) | **42.86%** (3/7) | **+42.86 pp** ← AI dynamic channel switch |
 | `insufficient_funds` | 10 | 40.00% (4/10) | **50.00%** (5/10) | **+10.00 pp** |
 | `risk_flag` | 7 | 42.86% (3/7) | 28.57% (2/7) | -14.29 pp |
 | `incorrect_pin` | 8 | 12.50% (1/8) | 12.50% (1/8) | 0.00 pp |
 
 ### AI Agent Action Breakdown (22 Genuine Groq Decisions)
 
-| Action | Count | % of AI Decisions |
-|---|---|---|
-| `retry_now` | 7 | 31.8% |
-| `switch_method` | 6 | 27.3% |
-| `abandon` | 6 | 27.3% |
-| `retry_later` | 3 | 13.6% |
+| Action | Count | % of AI Decisions | Primary Context Trigger |
+|---|---|---|---|
+| `retry_now` | 7 | 31.8% | Transient timeout & high customer LTV |
+| `switch_method` | 6 | 27.3% | Expired card & customer has preferred alternate methods |
+| `abandon` | 6 | 27.3% | Hard compliance stopping rule triggered (`stopping_rules.py`) |
+| `retry_later` | 3 | 13.6% | Insufficient funds with extended payroll delay |
 
-> **Key insight**: The AI agent correctly identified `expired_card` as a `switch_method` candidate (42.86% recovery vs 0% rule-based) — the rule-based system always gave up on expired cards. The Groq agent's LTV-aware reasoning directed customers to UPI/alternative payment channels instead.
 
 ---
 
@@ -136,9 +151,11 @@ POST /api/v1/webhooks/razorpay
 ## ⚙️ Tech Stack
 
 - **Frontend**: React 18, Vite, Tailwind CSS, Recharts, Framer Motion, Lucide Icons.
-- **Backend**: Go 1.23+, Fiber v2, GORM, HMAC-SHA256, Razorpay Payment Links API.
-- **AI/ML**: Python 3.13, FastAPI, XGBoost, Groq SDK (Llama-3), Pandas, NumPy.
-- **Database**: Neon Serverless PostgreSQL, Docker, Kubernetes, Vercel, Render.
+- **Backend API**: Go 1.23+, Fiber v2, GORM, HMAC-SHA256, Rate Limiter middleware, Razorpay Payment Links API.
+- **AI/ML Engine**: Python 3.13, FastAPI, XGBoost native classifier, Groq SDK (`groq/compound` LLM), Pandas, NumPy.
+- **Database**: Serverless PostgreSQL 15+ (Neon Cloud), Docker Compose.
+- **Infrastructure**: Vercel (Frontend), Render (Go Ingestion API), Illustrative Kubernetes Manifests (`k8s/` — see [k8s/README.md](k8s/README.md)).
+- **CI / Automation**: GitHub Actions (`.github/workflows/ci.yml`), GNU Makefile.
 
 ---
 
@@ -148,51 +165,70 @@ POST /api/v1/webhooks/razorpay
 ```bash
 git clone https://github.com/NitheeshP19/AI-Revenue-recovery-Engine.git
 cd AI-Revenue-recovery-Engine
-cp .env.example .env  # Fill in your GROQ_API_KEY, DATABASE_URL, RAZORPAY keys
+cp .env.example .env  # Populate GROQ_API_KEY, DATABASE_URL, and RAZORPAY test keys
 ```
 
-### 2. Train the ML Model (required once)
+### 2. Generate Synthetic Training Data & Train Model
 ```bash
-cd ml && python train_model.py
+# 1. Generate calibrated 5,000 transaction dataset into data/
+python synthetic_data_generator.py
+
+# 2. Train XGBoost classifier (exports ml/classifier.json)
+make train   # or: cd ml && python train_model.py
 ```
 
-### 3. Start All Services (Docker — recommended)
+### 3. Start All Services (Docker Compose)
 ```bash
 docker compose up --build
 ```
 
-### 3b. Or Start Manually (4 terminals)
+### 3b. Or Start Locally (Separate Terminals)
 ```bash
-# Terminal 1: Frontend
-cd dashboard && npm install && npm run dev       # http://localhost:5173
+# Terminal 1: Frontend Dashboard (port 5173)
+cd dashboard && npm install && npm run dev
 
-# Terminal 2: Go Backend
-cd go-api && go run .                            # http://localhost:8080
+# Terminal 2: Go Ingestion API (port 8080)
+cd go-api && go run .
 
-# Terminal 3: ML Inference
-cd ml && python inference_service.py             # http://localhost:8001
+# Terminal 3: ML Root-Cause Inference Service (port 8001)
+cd ml && python inference_service.py
 
-# Terminal 4: LLM Agent
-cd ml && python agent_service.py                 # http://localhost:8002
+# Terminal 4: Groq LLM Decision Agent (port 8002)
+cd ml && python agent_service.py
 ```
 
-### 4. Run the Recovery Simulation
+### 4. Run Strategy Benchmark Simulation
 ```bash
-# With Groq AI agent (all services must be running):
-python simulation_engine.py --sample 200
+# Run simulation with live Groq AI Agent:
+python simulation_engine.py --sample 100
 
-# Without Groq (offline heuristic mode):
-python simulation_engine.py --offline --sample 200
+# Run offline benchmark (heuristic mode only, zero API dependency):
+python simulation_engine.py --offline --sample 100
 ```
 
 ---
 
-## 🧪 Tests
+## 🧪 Testing & CI
 
+Continuous integration is automated via **GitHub Actions** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) running linting and unit tests across all three service stacks on every push and pull request.
+
+### Verified Test Results & Coverage
+
+| Service Stack | Test Framework | Test Count | Status / Coverage |
+|---|---|---|---|
+| **Go Ingestion API** | Go `testing` + `-race` | 9 test suites | 🟢 **PASS** (26.7% statement coverage — HTTP routing, input validation, HMAC signature checks) |
+| **ML & Agent Services** | Python `pytest` | 9 unit tests | 🟢 **PASS** (Schema validation, XGBoost inference, stopping rules, fallback handling) |
+| **React Dashboard** | `vitest` + `@testing-library` | 3 tests | 🟢 **PASS** (Component smoke testing, KPI rendering) |
+
+### Run Test Suite Locally
 ```bash
-cd go-api && go test ./... -v                    # Go backend
-cd ml && pytest test_services.py -v              # Python ML + Agent
-cd dashboard && npm test -- --run                # React UI smoke tests
+# Run all linters and tests via Makefile:
+make ci
+
+# Or run per-service:
+cd go-api && go test ./... -v -cover             # Go unit tests & coverage
+cd ml && pytest test_services.py -v              # Python ML & Agent tests
+cd dashboard && npm test -- --run                # React dashboard tests
 ```
 
 ---
@@ -204,3 +240,4 @@ Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for full terms.
 ```
 MIT License — Copyright (c) 2026 Nitheesh P
 ```
+

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airevrecovery
+  labels:
+    app.kubernetes.io/name: ai-revenue-recovery
+    app.kubernetes.io/managed-by: kubectl

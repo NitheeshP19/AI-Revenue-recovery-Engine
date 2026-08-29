@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/joho/godotenv"
 )
@@ -129,6 +130,19 @@ func main() {
 		ExposeHeaders:    "X-Correlation-ID",
 		AllowCredentials: false,
 		MaxAge:           86400, // pre-flight cache: 24 hours
+	}))
+
+	// Rate Limiter — 100 requests per minute per IP to protect webhook and ingestion routes.
+	app.Use(limiter.New(limiter.Config{
+		Max:               100,
+		Expiration:        1 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(ErrorResponse{
+				Status:  "error",
+				Error:   "RATE_LIMIT_EXCEEDED",
+				Details: "Too many requests. Please slow down and try again later.",
+			})
+		},
 	}))
 
 	// Request logger — emits one structured log line per HTTP request.
