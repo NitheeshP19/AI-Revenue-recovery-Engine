@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Dashboard smoke test — verifies the main dashboard component mounts
  * and renders the primary heading without crashing.
  *
@@ -20,8 +20,8 @@ describe("RevenueRecoveryDashboard", () => {
 
   it("renders the KPI section with at least one KPI label", () => {
     render(<RevenueRecoveryDashboard />);
-    // 'Total Revenue Recovered' is one of the KPI card labels
-    expect(screen.getByText(/Total Revenue Recovered/i)).toBeInTheDocument();
+    // 'AI Revenue Recovered' is one of the KPI card labels
+    expect(screen.getByText(/AI Revenue Recovered/i)).toBeInTheDocument();
   });
 
   it("renders the Start Simulation button", () => {
