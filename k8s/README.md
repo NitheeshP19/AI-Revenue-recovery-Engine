@@ -23,7 +23,7 @@ k8s/
 ├── secret.yaml                   ← secret template (fill before applying)
 ├── go-api-deployment.yaml        ← Go ingestion API (Deployment + Service)
 ├── ml-inference-deployment.yaml  ← Python XGBoost inference (Deployment + Service)
-├── agent-deployment.yaml         ← Python Groq agent (Deployment + Service)
+├── agent-deployment.yaml         ← Python Gemini agent (Deployment + Service)
 └── services.yaml                 ← ClusterIP services for inter-pod comms
 ```
 

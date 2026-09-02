@@ -4,11 +4,11 @@
 [![Live Backend API](https://img.shields.io/badge/Backend_API-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://ai-revenue-recovery-engine.onrender.com/health)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org/)
 [![Python FastAPI](https://img.shields.io/badge/Python-3.13_FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Groq Llama-3](https://img.shields.io/badge/LLM-Groq_Llama--3-F55036?style=for-the-badge&logo=meta&logoColor=white)](https://console.groq.com/)
+[![Google Gemini](https://img.shields.io/badge/LLM-Google_Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
 [![Razorpay API](https://img.shields.io/badge/Integration-Razorpay-0C2340?style=for-the-badge&logo=razorpay&logoColor=white)](https://razorpay.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-An enterprise-grade, autonomous, multi-agent AI revenue recovery engine that intelligently recovers failed payment transactions. It combines machine learning (**XGBoost** root-cause classification) and LLM agents (**Groq Llama-3** reasoning) with a **real Razorpay webhook integration** and automated **Payment Links API** recovery actions.
+An enterprise-grade, autonomous, multi-agent AI revenue recovery engine that intelligently recovers failed payment transactions. It combines machine learning (**XGBoost** root-cause classification) and LLM agents (**Google Gemini** reasoning) with a **real Razorpay webhook integration** and automated **Payment Links API** recovery actions.
 
 ---
 
@@ -31,25 +31,26 @@ An enterprise-grade, autonomous, multi-agent AI revenue recovery engine that int
 
 ---
 
-## ⚡ Benchmark Results — Groq AI Agent vs Rule-Based Baseline
+## ⚡ Benchmark Results — Gemini AI Agent vs Rule-Based Baseline
 
 > [!IMPORTANT]
 > **Dataset & Simulation Disclosure**:
 > Benchmark evaluations are conducted against a **calibrated synthetic dataset** (`data/failed_transactions.csv`, 5,000 samples) produced by `synthetic_data_generator.py` using distributions modeled after industry payment gateway error benchmarks. Real production payment failure records containing cardholder metadata cannot be published publicly due to **PCI-DSS and data localization regulations**.
 > For complete details on the synthetic generation parameters, stochastic recovery matrix, and fallback accounting, see [docs/BENCHMARK_METHODOLOGY.md](docs/BENCHMARK_METHODOLOGY.md).
 
-> **Run Date**: 2026-08-29 | **Simulation ID**: `236e1166` | **Sample**: 49 transactions | **Seed**: 42
-> **Agent Model**: `groq/compound` (live Groq API calls) | **ML Classifier**: XGBoost
+> **Run Date**: 2026-09-02 | **Simulation ID**: `7fa1163b` | **Sample**: 49 transactions | **Seed**: 42
+> **Agent Model**: `gemini-3.7-flash` (live Google Gemini API calls) | **ML Classifier**: XGBoost
 
-| Metric | Rule-Based Baseline (Strategy A) | Groq AI Agent (Strategy B — Genuine Decisions) | Lift |
+| Metric | Rule-Based Baseline (Strategy A) | Gemini AI Agent (Strategy B — Genuine Decisions) | Lift |
 |---|---|---|---|
-| **Transactions Evaluated** | 49 | 22 (genuine AI decisions) | — |
-| **Recovered Count** | 18 | 11 | — |
-| **Recovery Rate** | **36.73%** | **50.00%** | **+13.27 pp** 🚀 |
-| **Revenue Recovered** | **₹1,40,082.41** | **₹1,23,302.88** | -11.98% (smaller txns recovered) |
-| **Avg Decision Latency** | 0.5 ms | **11,251 ms** (live Groq LLM inference) | Real-time reasoning |
+| **Transactions Evaluated** | 49 | **49 (100% genuine AI decisions)** | — |
+| **Recovered Count** | 27 | **29** | — |
+| **Recovery Rate** | 55.10% | **59.18%** | **+4.08 pp** 🚀 |
+| **Revenue Recovered** | ₹1,23,805.49 | **₹2,57,076.34** | **+107.65%** 🚀 |
+| **Avg Decision Latency** | 0.5 ms | **4,140 ms** (live Gemini LLM inference) | Real-time reasoning |
+| **Fallbacks Encountered** | 0 | **0 (0.0%)** | 100% AI reliability |
 
-> **Fallback Transparency**: 27/49 transactions (55.1%) in this run hit the rule-based fallback when the upstream LLM endpoint experienced latency spikes. In accordance with benchmark reporting standards, fallback-handled transactions are **excluded from the AI headline rate** and tracked separately.
+> **Fallback Transparency**: 0/49 transactions (0.0%) used rule-based fallbacks in this benchmark run. All decisions were reasoned in real-time by the Gemini AI Agent.
 
 ### Strategy A: Competitive Heuristic Baseline Logic
 To ensure an unbiased benchmark (avoiding strawman comparisons), Strategy A implements a multi-rule heuristic derived from published fintech retry best practices (e.g., Stripe Smart Retries, Razorpay guidance):
@@ -68,20 +69,21 @@ To ensure an unbiased benchmark (avoiding strawman comparisons), Strategy A impl
 
 | Failure Reason | Total Txns | Rule Recovery | AI Recovery | Lift |
 |---|---|---|---|---|
-| `gateway_timeout` | 17 | 58.82% (10/17) | **76.47%** (13/17) | **+17.65 pp** |
-| `expired_card` | 7 | 0.00% (0/7) | **42.86%** (3/7) | **+42.86 pp** ← AI dynamic channel switch |
-| `insufficient_funds` | 10 | 40.00% (4/10) | **50.00%** (5/10) | **+10.00 pp** |
-| `risk_flag` | 7 | 42.86% (3/7) | 28.57% (2/7) | -14.29 pp |
-| `incorrect_pin` | 8 | 12.50% (1/8) | 12.50% (1/8) | 0.00 pp |
+| `gateway_timeout` | 17 | 52.94% (9/17) | **76.47%** (13/17) | **+23.53 pp** 🚀 |
+| `insufficient_funds` | 10 | 50.00% (5/10) | **60.00%** (6/10) | **+10.00 pp** 🚀 |
+| `expired_card` | 7 | 71.43% (5/7) | **71.43%** (5/7) | 0.00 pp |
+| `incorrect_pin` | 8 | 75.00% (6/8) | 50.00% (4/8) | -25.00 pp |
+| `risk_flag` | 7 | 28.57% (2/7) | 14.29% (1/7) | -14.28 pp |
 
-### AI Agent Action Breakdown (22 Genuine Groq Decisions)
+### AI Agent Action Breakdown (49 Genuine Gemini Decisions)
 
 | Action | Count | % of AI Decisions | Primary Context Trigger |
 |---|---|---|---|
-| `retry_now` | 7 | 31.8% | Transient timeout & high customer LTV |
-| `switch_method` | 6 | 27.3% | Expired card & customer has preferred alternate methods |
-| `abandon` | 6 | 27.3% | Hard compliance stopping rule triggered (`stopping_rules.py`) |
-| `retry_later` | 3 | 13.6% | Insufficient funds with extended payroll delay |
+| `retry_now` | 19 | 38.8% | Transient gateway timeout & high customer LTV |
+| `switch_method` | 14 | 28.6% | Expired card / credential issues & customer has alternative instruments |
+| `retry_later` | 8 | 16.3% | Insufficient funds with salary buffer or risk cooling window |
+| `abandon` | 6 | 12.2% | Hard compliance stopping rule triggered (`stopping_rules.py`) |
+| `give_up` | 2 | 4.1% | Exceeded retry ceiling (`recent_retries >= 3`) |
 
 
 ---
@@ -96,8 +98,8 @@ graph TD
     D[Simulation Engine] -->|Fetch Transactions| C
     D -->|Feature Vector| E[Python XGBoost ML Service - Port 8001]
     E -->|Root Cause Classification| D
-    D -->|Context: LTV + Retries + Error| F[Python Groq Agent Service - Port 8002]
-    F -->|Llama-3 Decision & Trace| D
+    D -->|Context: LTV + Retries + Error| F[Python Gemini Agent Service - Port 8002]
+    F -->|Gemini Decision & Trace| D
     B -->|Create Recovery Link| RZ2[Razorpay Payment Links API]
     RZ2 -->|Short URL & Status| B
     B -->|Log Recovery Action| C
@@ -108,7 +110,7 @@ graph TD
 1. **Frontend Dashboard (`dashboard/`)**: Vite + React + Tailwind CSS + Framer Motion + Recharts. KPI metrics, failure breakdown charts, strategy comparisons, and degraded agent indicators.
 2. **Go Ingestion Backend (`go-api/`)**: High-throughput Golang Fiber REST API with constant-time HMAC-SHA256 webhook verification, async goroutine dispatch, and Neon PostgreSQL persistence.
 3. **ML Inference Service (`ml/inference_service.py`)**: FastAPI microservice serving a trained **XGBoost Classifier** that identifies the root cause of transaction failures.
-4. **LLM Decision Agent (`ml/agent_service.py`)**: FastAPI microservice powered by **Groq (Llama-3)** executing bounded financial recovery logic with customer LTV awareness and automatic rule-based fallback.
+4. **LLM Decision Agent (`ml/agent_service.py`)**: FastAPI microservice powered by **Google Gemini** executing bounded financial recovery logic with customer LTV awareness and automatic rule-based fallback.
 5. **Database (`schema.sql`)**: Cloud Neon PostgreSQL with custom ENUMs, partial indexes, and JSONB reasoning traces.
 
 ---
@@ -152,7 +154,7 @@ POST /api/v1/webhooks/razorpay
 
 - **Frontend**: React 18, Vite, Tailwind CSS, Recharts, Framer Motion, Lucide Icons.
 - **Backend API**: Go 1.23+, Fiber v2, GORM, HMAC-SHA256, Rate Limiter middleware, Razorpay Payment Links API.
-- **AI/ML Engine**: Python 3.13, FastAPI, XGBoost native classifier, Groq SDK (`groq/compound` LLM), Pandas, NumPy.
+- **AI/ML Engine**: Python 3.13, FastAPI, XGBoost native classifier, Google GenAI SDK (`gemini-3.6-flash` LLM), Pandas, NumPy.
 - **Database**: Serverless PostgreSQL 15+ (Neon Cloud), Docker Compose.
 - **Infrastructure**: Vercel (Frontend), Render (Go Ingestion API), Illustrative Kubernetes Manifests (`k8s/` — see [k8s/README.md](k8s/README.md)).
 - **CI / Automation**: GitHub Actions (`.github/workflows/ci.yml`), GNU Makefile.
@@ -165,7 +167,7 @@ POST /api/v1/webhooks/razorpay
 ```bash
 git clone https://github.com/NitheeshP19/AI-Revenue-recovery-Engine.git
 cd AI-Revenue-recovery-Engine
-cp .env.example .env  # Populate GROQ_API_KEY, DATABASE_URL, and RAZORPAY test keys
+cp .env.example .env  # Populate GEMINI_API_KEY, DATABASE_URL, and RAZORPAY test keys
 ```
 
 ### 2. Generate Synthetic Training Data & Train Model
@@ -193,13 +195,13 @@ cd go-api && go run .
 # Terminal 3: ML Root-Cause Inference Service (port 8001)
 cd ml && python inference_service.py
 
-# Terminal 4: Groq LLM Decision Agent (port 8002)
+# Terminal 4: Gemini LLM Decision Agent (port 8002)
 cd ml && python agent_service.py
 ```
 
 ### 4. Run Strategy Benchmark Simulation
 ```bash
-# Run simulation with live Groq AI Agent:
+# Run simulation with live Gemini AI Agent:
 python simulation_engine.py --sample 100
 
 # Run offline benchmark (heuristic mode only, zero API dependency):
@@ -240,4 +242,3 @@ Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for full terms.
 ```
 MIT License — Copyright (c) 2026 Nitheesh P
 ```
-

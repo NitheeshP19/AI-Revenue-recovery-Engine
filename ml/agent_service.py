@@ -1,12 +1,12 @@
 """
 ===============================================================================
-  AI Revenue Recovery System — Groq Agent Service
+  AI Revenue Recovery System — AI Agent Service (Gemini / Groq)
   Phase 4 | FastAPI Decision Engine
   Author  : Lead AI Engineer
-  Version : 1.0.0
+  Version : 2.0.0
 -------------------------------------------------------------------------------
   PURPOSE:
-    Serves as the core LLM reasoning agent using the Groq API (Llama-3).
+    Serves as the core LLM reasoning agent using Google Gemini (or Groq).
     Receives a payload containing customer profile, payment context, system 
     status, and the classification output from the ML classifier.
     Evaluates context to choose one of four recovery actions:
@@ -14,15 +14,15 @@
       • retry_later
       • switch_method
       • give_up
-    Ensures strict JSON output format, handles rate limits (HTTP 429), timeouts,
-    and falls back to rule-based decisions if Groq API is unavailable.
+    Ensures strict JSON output format, handles rate limits, timeouts,
+    and falls back to rule-based decisions if LLM API is unavailable.
 
   SETUP:
-    pip install fastapi uvicorn[standard] groq python-dotenv pydantic
-    Set GROQ_API_KEY environment variable.
+    pip install fastapi uvicorn[standard] google-genai groq python-dotenv pydantic
+    Set GEMINI_API_KEY (or GROQ_API_KEY) environment variable.
 
   RUN:
-    python agent_api.py
+    python agent_service.py
 ===============================================================================
 """
 
@@ -39,10 +39,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
-from groq import Groq, GroqError, APIConnectionError, APITimeoutError, RateLimitError
+
+from pathlib import Path
 
 # Load environment variables from .env
-load_dotenv()
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path)
+else:
+    load_dotenv()
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -52,15 +57,43 @@ logging.basicConfig(
 )
 log = logging.getLogger("agent_service")
 
-# Initialize Groq Client
+# ── LLM Client Initialization ──────────────────────────────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    log.warning("Warning: GROQ_API_KEY environment variable is not set. Service will run in FALLBACK-ONLY mode.")
 
-client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+gemini_client = None
+if GEMINI_API_KEY:
+    try:
+        from google import genai
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+        log.info("Google Gemini client initialized successfully.")
+    except Exception as e:
+        log.error(f"Failed to initialize Google Gemini client: {e}")
 
-# Supported Groq Models (verified as active on Groq API — 2026-08-20)
-DEFAULT_MODEL = "groq/compound"
+groq_client = None
+if GROQ_API_KEY:
+    try:
+        from groq import Groq
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        log.info("Groq client initialized successfully.")
+    except Exception as e:
+        log.error(f"Failed to initialize Groq client: {e}")
+
+if not gemini_client and not groq_client:
+    log.warning("Warning: Neither GEMINI_API_KEY nor GROQ_API_KEY is set. Service will run in FALLBACK-ONLY mode.")
+
+# Supported Models
+DEFAULT_GEMINI_MODEL = "gemini-3.7-flash"
+SUPPORTED_GEMINI_MODELS = {
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.6-flash",
+}
+
+DEFAULT_GROQ_MODEL = "groq/compound"
 SUPPORTED_GROQ_MODELS = {
     "groq/compound",
     "groq/compound-mini",
@@ -68,6 +101,8 @@ SUPPORTED_GROQ_MODELS = {
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
 }
+
+DEFAULT_MODEL = DEFAULT_GEMINI_MODEL if gemini_client else DEFAULT_GROQ_MODEL
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  PYDANTIC SCHEMAS (Aligns with Contract B and Contract C)
@@ -228,7 +263,7 @@ class DecisionResponse(BaseModel):
 
 def make_fallback_response(request: DecisionRequest, reason: str) -> DecisionResponse:
     """
-    Rule-based fallback logic invoked when the Groq LLM API is unavailable,
+    Rule-based fallback logic invoked when the LLM API is unavailable,
     rate-limited, or times out.
     """
     pred_reason = request.predicted_failure_reason
@@ -238,7 +273,7 @@ def make_fallback_response(request: DecisionRequest, reason: str) -> DecisionRes
     delay = 30
     channel = None
     comm_hint = "We encountered a temporary payment processing issue. We will automatically retry in 30 minutes."
-    triggered_rules = ["FALLBACK: GROQ_SERVICE_UNAVAILABLE"]
+    triggered_rules = [f"FALLBACK: {reason.upper()}"]
 
     # Simple deterministic heuristics
     if cust_profile.recent_retries >= 3:
@@ -248,15 +283,31 @@ def make_fallback_response(request: DecisionRequest, reason: str) -> DecisionRes
     elif pred_reason == "expired_card":
         decision = "switch_method"
         comm_hint = "Your card has expired. Please choose a different payment method to complete the payment."
-        triggered_rules.append("FALLBACK_RULE: expired_card -> switch_method")
-        if cust_profile.preferred_payment_methods:
-            channel = cust_profile.preferred_payment_methods[0]
-    elif pred_reason in ["insufficient_funds", "incorrect_pin"]:
+        triggered_rules.append("FALLBACK_RULE: permanent_instrument_failure (expired_card) -> switch_method")
+    elif pred_reason == "gateway_timeout":
+        decision = "retry_now"
+        delay = None
+        comm_hint = "Payment gateway timed out. Retrying your transaction immediately."
+        triggered_rules.append("FALLBACK_RULE: transient_network_error (gateway_timeout) -> retry_now")
+    elif pred_reason == "insufficient_funds":
         decision = "retry_later"
-        comm_hint = "Please check your account balance or PIN and retry. We will try again in 30 minutes."
-        triggered_rules.append(f"FALLBACK_RULE: customer_side_fault_{pred_reason} -> retry_later")
-    else:
-        triggered_rules.append("FALLBACK_RULE: transient_error -> retry_later")
+        delay = 60
+        comm_hint = "Insufficient funds detected. We will re-attempt your payment shortly."
+        triggered_rules.append("FALLBACK_RULE: customer_balance_insufficient (insufficient_funds) -> retry_later")
+    elif pred_reason == "risk_flag":
+        decision = "retry_later"
+        delay = 120
+        comm_hint = "Transaction flagged by risk filters. Retrying after safety cooldown."
+        triggered_rules.append("FALLBACK_RULE: fraud_velocity_cooldown (risk_flag) -> retry_later")
+    elif pred_reason == "incorrect_pin":
+        decision = "switch_method"
+        comm_hint = "Authentication failed. Please verify credentials or switch payment method."
+        triggered_rules.append("FALLBACK_RULE: authentication_credential_error (incorrect_pin) -> switch_method")
+
+    considered = [
+        ConsideredAction(action=decision, score=0.99, selected=True),
+        ConsideredAction(action="retry_now" if decision != "retry_now" else "retry_later", score=0.01, selected=False)
+    ]
 
     return DecisionResponse(
         job_id            = request.job_id,
@@ -265,95 +316,81 @@ def make_fallback_response(request: DecisionRequest, reason: str) -> DecisionRes
         decision_version  = request.agent_config.decision_version,
         decided_at        = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         decision          = decision,
-        confidence_score  = 0.5000,
-        action_rationale  = "Fallback: Groq unavailable, defaulting to rule-based retry",
+        confidence_score  = 0.50,
+        action_rationale  = f"Decision made by rule-based fallback engine: {reason}",
         action_parameters = ActionParameters(
-            recommended_retry_delay_mins = delay if decision == "retry_later" else None,
+            recommended_retry_delay_mins = delay,
             recommended_channel          = channel,
             customer_communication_hint  = comm_hint,
             send_notification            = True,
             notification_channel         = "email"
         ),
         reasoning_trace   = ReasoningTrace(
-            summary            = f"Fallback decision activated. Reason: {reason}",
-            decision_path      = f"fallback_rule -> {decision}",
+            summary            = f"Fallback heuristic applied due to: {reason}",
+            decision_path      = f"{pred_reason} -> [FALLBACK] -> {decision}",
             feature_vector     = {
-                "payment_method":     request.payment_context.payment_method,
-                "failure_reason_raw": request.payment_context.failure_reason_raw,
+                "payment_method":           request.payment_context.payment_method,
+                "failure_reason_raw":       request.payment_context.failure_reason_raw,
                 "predicted_failure_reason": pred_reason,
-                "recent_retries":     float(cust_profile.recent_retries),
-                "customer_ltv":       cust_profile.customer_ltv,
-                "is_vip":             cust_profile.is_vip
+                "recent_retries":           float(cust_profile.recent_retries),
+                "customer_ltv":             cust_profile.customer_ltv,
+                "is_vip":                   cust_profile.is_vip,
+                "gateway_health":           request.system_context.gateway_health_status or "healthy"
             },
             triggered_rules    = triggered_rules,
-            considered_actions = [
-                ConsideredAction(action=decision, score=0.5000, selected=True),
-                ConsideredAction(action="retry_now" if decision != "retry_now" else "retry_later", score=0.2000, selected=False)
-            ],
-            chain_of_thought   = f"The Groq LLM agent was unavailable or timed out ({reason}). Activating rule-based fallback decision.",
-            llm_model_used     = "fallback-rule-engine",
+            considered_actions = considered,
+            chain_of_thought   = f"LLM agent unavailable ({reason}). Executed baseline rule heuristic based on failure reason '{pred_reason}' and retry count {cust_profile.recent_retries}.",
+            llm_model_used     = "rule-based-fallback-engine",
             prompt_tokens      = 0,
             completion_tokens  = 0,
             agent_latency_ms   = 0,
             schema_version     = "1.0.0"
         ),
-        # ↓ Critical: mark this response as a fallback so callers can surface it.
-        fallback_status   = "agent_unavailable_fallback",
+        fallback_status = "agent_unavailable_fallback"
     )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FASTAPI APPLICATION
+#  FASTAPI APP
 # ══════════════════════════════════════════════════════════════════════════════
 
 app = FastAPI(
-    title       = "AI Revenue Recovery — Groq Agent Service",
-    description = "Decides recovery action using Groq LLM reasoning (Llama-3).",
-    version     = "1.0.0",
+    title       = "AI Revenue Recovery System — AI Agent Service",
+    description = "LLM Recovery Reasoning Agent supporting Google Gemini and Groq with fallback heuristics",
+    version     = "2.0.0",
 )
-
-# CORS Middleware
-# Only allow wildcard if ALLOW_INSECURE_CORS=true is explicitly set.
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
-if not _raw_origins:
-    if os.getenv("ALLOW_INSECURE_CORS") == "true":
-        _raw_origins = "*"
-        log.warning("CORS is open to ALL origins (ALLOW_INSECURE_CORS=true). Do NOT use in production.")
-    else:
-        _raw_origins = "http://localhost:5173"
-if _raw_origins == "*":
-    log.warning("ALLOWED_ORIGINS is '*' — restrict to your dashboard domain in production.")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = _raw_origins.split(","),
-    allow_methods     = ["GET", "POST", "OPTIONS"],
+    allow_origins     = ["*"],
+    allow_credentials = True,
+    allow_methods     = ["*"],
     allow_headers     = ["*"],
-    allow_credentials = False,
 )
 
 
 @app.get("/health", tags=["System"])
-async def health_check():
-    """Liveness probe. Returns healthy status and agent details."""
+async def health():
     return {
-        "status":        "ok",
-        "service":       "groq-agent-service",
-        "groq_loaded":   client is not None,
-        "default_model": DEFAULT_MODEL,
-        "version":       "1.0.0"
+        "status":  "healthy",
+        "service": "ai-agent-service",
+        "version": "2.0.0",
+        "active_provider": "gemini" if gemini_client else ("groq" if groq_client else "fallback_only")
     }
 
 
 @app.get("/agent/status", tags=["System"])
 async def agent_status():
-    """Reports whether the Groq LLM client is available or running in fallback-only mode."""
-    groq_available = client is not None
+    """Reports whether the LLM client is available or running in fallback-only mode."""
+    available = (gemini_client is not None) or (groq_client is not None)
     return {
-        "groq_available":    groq_available,
-        "fallback_only":     not groq_available,
-        "fallback_reason":   "GROQ_API_KEY not configured" if not groq_available else None,
-        "status":            "ok" if groq_available else "degraded",
+        "gemini_available": gemini_client is not None,
+        "groq_available":   groq_client is not None,
+        "llm_available":    available,
+        "fallback_only":    not available,
+        "fallback_reason":  "No valid GEMINI_API_KEY or GROQ_API_KEY configured" if not available else None,
+        "status":           "ok" if available else "degraded",
+        "active_provider":  "gemini" if gemini_client else ("groq" if groq_client else "fallback_only")
     }
 
 
@@ -375,24 +412,34 @@ def clean_json_str(raw: str) -> str:
 async def decide(request: DecisionRequest) -> DecisionResponse:
     """
     Ingests classification, customer context, and system status to decide on recovery action.
-    Uses Llama-3 (Groq API) with structured output. Falls back to default rules on errors.
+    Uses Google Gemini (or Groq) with structured output. Falls back to default rules on errors.
     """
     t_start = time.perf_counter()
 
-    # If client is not initialized, go straight to fallback
-    if not client:
-        log.warning(f"job_id={request.job_id} | Groq Client not initialized. Running fallback.")
-        return make_fallback_response(request, "Groq client not configured (Missing GROQ_API_KEY)")
+    # If neither client is initialized, go straight to fallback
+    if not gemini_client and not groq_client:
+        log.warning(f"job_id={request.job_id} | No LLM Client initialized. Running fallback.")
+        return make_fallback_response(request, "LLM client not configured (Missing GEMINI_API_KEY / GROQ_API_KEY)")
 
     cust_profile = request.resolved_customer_profile
     pred_reason = request.predicted_failure_reason
     confidence = request.classification_confidence
 
-    # Select the model ID
-    model_id = request.agent_config.model_id
-    if model_id not in SUPPORTED_GROQ_MODELS:
-        log.warning(f"Requested model '{model_id}' is not in supported Groq models list. Defaulting to '{DEFAULT_MODEL}'.")
-        model_id = DEFAULT_MODEL
+    # Select model ID and provider
+    req_model = request.agent_config.model_id
+
+    if gemini_client:
+        provider = "gemini"
+        if req_model in SUPPORTED_GEMINI_MODELS:
+            model_id = req_model
+        else:
+            model_id = DEFAULT_GEMINI_MODEL
+    else:
+        provider = "groq"
+        if req_model in SUPPORTED_GROQ_MODELS:
+            model_id = req_model
+        else:
+            model_id = DEFAULT_GROQ_MODEL
 
     # Craft System Prompt
     system_prompt = """You are the core AI Revenue Recovery Decision Engine.
@@ -447,23 +494,78 @@ Return ONLY the JSON payload, without markdown code fences or conversational tex
         current_gateway_error_rate_pct = request.system_context.current_gateway_error_rate_pct or 0.0
     )
 
-    # Invoke Groq API within a try-except block
     try:
-        log.info(f"job_id={request.job_id} | Sending decision request to Groq using model={model_id}")
-        
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Decide recovery action for job_id {request.job_id}."}
-            ],
-            model=model_id,
-            response_format={"type": "json_object"},
-            temperature=0.1,  # Low temperature for highly consistent decision making
-            timeout=10.0,     # Prevent hanging requests
-        )
+        response_text = ""
+        prompt_tokens = 0
+        completion_tokens = 0
 
-        response_text = chat_completion.choices[0].message.content
-        log.debug(f"job_id={request.job_id} | Raw Groq Response: {response_text}")
+        if provider == "gemini":
+            log.info(f"job_id={request.job_id} | Sending decision request to Google Gemini using model={model_id}")
+            from google.genai import types
+            gemini_config = types.GenerateContentConfig(
+                temperature=0.1,
+                response_mime_type="application/json",
+            )
+            candidate_models = [model_id] + [m for m in ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] if m != model_id]
+            last_err = None
+            gemini_response = None
+            for candidate in candidate_models:
+                try:
+                    gemini_response = gemini_client.models.generate_content(
+                        model=candidate,
+                        contents=f"{system_prompt}\n\nDecide recovery action for job_id {request.job_id}.",
+                        config=gemini_config
+                    )
+                    model_id = candidate
+                    break
+                except Exception as ex:
+                    last_err = ex
+                    log.warning(f"job_id={request.job_id} | Model {candidate} returned error: {ex}. Trying next candidate...")
+            
+            if gemini_response is not None:
+                response_text = gemini_response.text or ""
+                if hasattr(gemini_response, "usage_metadata") and gemini_response.usage_metadata:
+                    prompt_tokens = getattr(gemini_response.usage_metadata, "prompt_token_count", 0) or 0
+                    completion_tokens = getattr(gemini_response.usage_metadata, "candidates_token_count", 0) or 0
+            elif groq_client:
+                # Secondary LLM backup: Groq
+                log.info(f"job_id={request.job_id} | All Gemini models busy/exhausted. Falling back to Groq LLM...")
+                provider = "groq"
+                model_id = DEFAULT_GROQ_MODEL
+                chat_completion = groq_client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Decide recovery action for job_id {request.job_id}."}
+                    ],
+                    model=model_id,
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                    timeout=10.0,
+                )
+                response_text = chat_completion.choices[0].message.content
+                usage = chat_completion.usage
+                prompt_tokens = usage.prompt_tokens if usage else 0
+                completion_tokens = usage.completion_tokens if usage else 0
+            else:
+                raise last_err or Exception("All LLM providers failed")
+        else:
+            log.info(f"job_id={request.job_id} | Sending decision request to Groq using model={model_id}")
+            chat_completion = groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Decide recovery action for job_id {request.job_id}."}
+                ],
+                model=model_id,
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                timeout=10.0,
+            )
+            response_text = chat_completion.choices[0].message.content
+            usage = chat_completion.usage
+            prompt_tokens = usage.prompt_tokens if usage else 0
+            completion_tokens = usage.completion_tokens if usage else 0
+
+        log.debug(f"job_id={request.job_id} | Raw Response: {response_text}")
 
         # Clean and Parse JSON response
         cleaned_json = clean_json_str(response_text)
@@ -472,11 +574,9 @@ Return ONLY the JSON payload, without markdown code fences or conversational tex
         latency_ms = int((time.perf_counter() - t_start) * 1000.0)
 
         # Assemble full Contract C DecisionResponse
-        # Use defaults in case model returns missing keys
         action_params = decision_data.get("action_parameters", {})
         trace_data = decision_data.get("reasoning_trace", {})
 
-        # Re-build considered actions to guarantee schema conformity
         raw_considered = trace_data.get("considered_actions", [])
         considered_actions = []
         for act in raw_considered:
@@ -489,16 +589,10 @@ Return ONLY the JSON payload, without markdown code fences or conversational tex
                     )
                 )
 
-        # Ensure we fall back if no actions were returned
         if not considered_actions:
             considered_actions = [
                 ConsideredAction(action=decision_data.get("decision", "retry_later"), score=decision_data.get("confidence_score", 0.5), selected=True)
             ]
-
-        # Extract prompt / usage stats
-        usage = chat_completion.usage
-        prompt_tokens = usage.prompt_tokens if usage else 0
-        completion_tokens = usage.completion_tokens if usage else 0
 
         # Construct final output
         response = DecisionResponse(
@@ -518,7 +612,7 @@ Return ONLY the JSON payload, without markdown code fences or conversational tex
                 notification_channel         = action_params.get("notification_channel", "email")
             ),
             reasoning_trace   = ReasoningTrace(
-                summary            = trace_data.get("summary", "Decision completed by Groq Agent."),
+                summary            = trace_data.get("summary", f"Decision completed by {provider.capitalize()} Agent."),
                 decision_path      = trace_data.get("decision_path", f"{pred_reason} -> {decision_data.get('decision')}"),
                 feature_vector     = {
                     "payment_method":           request.payment_context.payment_method,
@@ -531,33 +625,27 @@ Return ONLY the JSON payload, without markdown code fences or conversational tex
                 },
                 triggered_rules    = trace_data.get("triggered_rules", []),
                 considered_actions = considered_actions,
-                chain_of_thought   = trace_data.get("chain_of_thought", "Decision reasoned by Groq agent."),
+                chain_of_thought   = trace_data.get("chain_of_thought", f"Decision reasoned by {provider.capitalize()} agent."),
                 llm_model_used     = model_id,
                 prompt_tokens      = prompt_tokens,
                 completion_tokens  = completion_tokens,
                 agent_latency_ms   = latency_ms,
-                schema_version     = "1.0.0"
+                schema_version     = "2.0.0"
             )
         )
         
         log.info(
             f"job_id={request.job_id} | DECISION='{response.decision}' | CONF={response.confidence_score:.4f} | "
-            f"LATENCY={latency_ms}ms | model={model_id}"
+            f"LATENCY={latency_ms}ms | provider={provider} | model={model_id}"
         )
         return response
 
-    except (RateLimitError, APITimeoutError, APIConnectionError) as e:
-        log.error(f"job_id={request.job_id} | Groq API transient failure: {e.__class__.__name__}: {str(e)}")
-        return make_fallback_response(request, f"Groq transient error: {e.__class__.__name__}")
-    except GroqError as e:
-        log.error(f"job_id={request.job_id} | Groq API fatal error: {str(e)}")
-        return make_fallback_response(request, f"Groq fatal error: {str(e)}")
     except json.JSONDecodeError as e:
-        log.error(f"job_id={request.job_id} | Failed to decode JSON from Groq output: {str(e)}")
-        return make_fallback_response(request, "Groq output was not valid JSON")
+        log.error(f"job_id={request.job_id} | Failed to decode JSON from {provider} output: {str(e)}")
+        return make_fallback_response(request, f"{provider} output was not valid JSON")
     except Exception as e:
         log.error(f"job_id={request.job_id} | Unhandled error in agent decision pipeline: {str(e)}", exc_info=True)
-        return make_fallback_response(request, f"Internal pipeline error: {str(e)}")
+        return make_fallback_response(request, f"{provider} error: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

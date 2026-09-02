@@ -12,8 +12,8 @@
     Strategy A — Baseline Rule-Based (Heuristic)
       Standard industry rules based purely on amount and retry count.
 
-    Strategy B — AI Agent Strategy (Groq + XGBoost)
-      Calls the Phase 4 Groq Agent Service (POST /agent/decide) for each
+    Strategy B — AI Agent Strategy (Gemini + XGBoost)
+      Calls the Phase 4 Gemini Agent Service (POST /agent/decide) for each
       transaction and uses its structured JSON decision. Falls back to the
       heuristic if the service is unreachable.
 
@@ -231,7 +231,7 @@ def rule_based_decision(amount: float, recent_retries: int, failure_reason: str 
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  STRATEGY B — AI AGENT (GROQ / LLAMA-3)
+#  STRATEGY B — AI AGENT (GEMINI)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def ai_agent_decision(
@@ -240,7 +240,7 @@ def ai_agent_decision(
     session: requests.Session,
 ) -> Tuple[str, str, int, bool, str]:
     """
-    Calls the Phase 4 Groq Agent microservice to get a structured recovery decision.
+    Calls the Phase 4 Gemini Agent microservice to get a structured recovery decision.
 
     Returns:
         (action, reasoning_summary, latency_ms, is_fallback, action_rationale)
@@ -257,7 +257,7 @@ def ai_agent_decision(
         "failed_payment_id": transaction["transaction_id"],
         "request_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "agent_config": {
-            "model_id":               "llama-3.1-8b-instant",
+            "model_id":               "gemini-3.7-flash",
             "decision_version":       1,
             "confidence_threshold":   0.50,
             "enable_chain_of_thought": True,
@@ -317,12 +317,12 @@ def ai_agent_decision(
         latency_ms = int((time.perf_counter() - t_start) * 1000)
         log.warning(f"Agent unreachable ({e.__class__.__name__}) — using rule-based fallback")
         fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
-        return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True, "Fallback: Groq unavailable, defaulting to rule-based retry"
+        return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True, "Fallback: Gemini unavailable, defaulting to rule-based retry"
 
     # Graceful fallback for non-200 responses.
     latency_ms = int((time.perf_counter() - t_start) * 1000)
     fallback_action = rule_based_decision(float(transaction["amount"]), int(transaction["recent_retries"]))
-    return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True, "Fallback: Groq unavailable, defaulting to rule-based retry"
+    return fallback_action, "Fallback: agent unreachable — heuristic applied", latency_ms, True, "Fallback: Gemini unavailable, defaulting to rule-based retry"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -346,7 +346,7 @@ class TransactionResult:
     ai_reasoning_trace: str
     ai_latency_ms:     int
     # True when the AI decision was actually made by the heuristic fallback,
-    # not the real Groq LLM. Affects headline metrics reporting.
+    # not the real Gemini LLM. Affects headline metrics reporting.
     ai_is_fallback:    bool = False
 
 
@@ -613,7 +613,7 @@ def run_simulation(
 
     # AI metrics computed on GENUINE AI decisions only (fallbacks excluded).
     ai_metrics = compute_metrics(
-        name          = "AI Agent (Groq + Llama-3) — Genuine Decisions",
+        name          = "AI Agent (Google Gemini) — Genuine Decisions",
         results       = genuine_ai_results if genuine_ai_results else results,
         action_key    = "ai_action",
         recovered_key = "ai_recovered",
@@ -622,7 +622,7 @@ def run_simulation(
 
     # Fallback bucket metrics (for separate reporting).
     fallback_metrics = compute_metrics(
-        name          = "Fallback (Heuristic — Groq Unavailable)",
+        name          = "Fallback (Heuristic — Gemini Unavailable)",
         results       = fallback_results if fallback_results else [],
         action_key    = "ai_action",
         recovered_key = "ai_recovered",
@@ -736,7 +736,7 @@ def run_simulation(
                 "action_breakdown":  ai_metrics.action_breakdown,
                 "note": "Headline rate excludes fallback-affected transactions. See fallback_bucket.",
             },
-            # Transactions where Groq was unavailable — decisions made by heuristic.
+            # Transactions where Gemini was unavailable — decisions made by heuristic.
             # These are NEVER included in the headline AI recovery rate.
             "fallback_bucket": (
                 {
@@ -778,7 +778,7 @@ def main():
     )
     parser.add_argument(
         "--agent-url", type=str, default=DEFAULT_AGENT_URL,
-        help=f"Base URL of the Groq Agent Service (default: {DEFAULT_AGENT_URL})"
+        help=f"Base URL of the Gemini Agent Service (default: {DEFAULT_AGENT_URL})"
     )
     parser.add_argument(
         "--offline", action="store_true",

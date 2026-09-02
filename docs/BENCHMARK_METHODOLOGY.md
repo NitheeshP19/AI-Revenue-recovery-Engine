@@ -62,7 +62,7 @@ Because simulation operates offline or on sandbox events without charging real c
 
 ## 5. Fallback Accounting & Transparency
 
-When calling the Groq LLM Agent (`POST /agent/decide`):
+When calling the Gemini LLM Agent (`POST /agent/decide`):
 - If the agent endpoint is unavailable, experiences network timeout, or hits API rate limits, the system falls back to the deterministic heuristic.
 - **Reporting Rule**: Transactions that trigger the fallback are tagged with `fallback_status: "agent_unavailable_fallback"`, tracked in a separate `fallback_bucket` in `metrics_summary.json`, and **excluded from the headline AI decision rate** to prevent distortion.
 
@@ -74,7 +74,7 @@ When calling the Groq LLM Agent (`POST /agent/decide`):
 # 1. Regenerate synthetic transactions (optional)
 python synthetic_data_generator.py
 
-# 2. Run simulation with live Groq AI Agent:
+# 2. Run simulation with live Gemini AI Agent:
 cd ml && python agent_service.py &
 python simulation_engine.py --sample 100
 

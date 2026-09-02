@@ -448,7 +448,7 @@ function StrategyComparisonRow({ strategies, kpis }) {
       </h2>
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="text-center text-xs text-slate-500 font-medium uppercase tracking-wider pb-2 border-b border-slate-800">Rule-Based Baseline</div>
-        <div className="text-center text-xs text-cyan-400 font-medium uppercase tracking-wider pb-2 border-b border-cyan-500/30">AI Agent (Groq)</div>
+        <div className="text-center text-xs text-cyan-400 font-medium uppercase tracking-wider pb-2 border-b border-cyan-500/30">Gemini </div>
       </div>
       <div className="flex flex-col gap-3">
         {cols.map((col) => (
@@ -560,7 +560,7 @@ export default function RevenueRecoveryDashboard() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 bg-slate-800/60 border border-slate-700/50 rounded-xl px-3 py-2 text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-slate-400">Groq Llama-3 · Active</span>
+              <span className="text-slate-400">Gemini  · Active</span>
             </div>
             <div className="text-xs text-slate-600">
               {new Date(meta.generated_at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
@@ -632,7 +632,7 @@ export default function RevenueRecoveryDashboard() {
             icon={Zap}
             label="Avg Decision Latency"
             value={<><AnimatedCounter target={kpis.ai_avg_latency_ms} />ms</>}
-            sub="Via Groq Llama-3 inference"
+            sub="Via Gemini  inference"
             accent="amber"
             delay={0.3}
           />

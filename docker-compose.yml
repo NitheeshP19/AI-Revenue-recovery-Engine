@@ -52,12 +52,13 @@ services:
       - "8000:8000"
     restart: always
 
-  groq-agent:
+  gemini-agent:
     build:
       context: ./ml
       dockerfile: Dockerfile.agent
-    container_name: revenue_recovery_groq_agent
+    container_name: revenue_recovery_gemini_agent
     environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
       GROQ_API_KEY: ${GROQ_API_KEY}
       PORT: 8001
       # IMPORTANT: In production, restrict this to your real dashboard domain.

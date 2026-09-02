@@ -150,12 +150,12 @@ def agent_client():
 
 
 def test_agent_health(agent_client):
-    """GET /health should return 200 with status ok."""
+    """GET /health should return 200 with status healthy."""
     r = agent_client.get("/health")
     assert r.status_code == 200
     body = r.json()
-    assert body.get("status") == "ok"
-    assert body.get("service") == "groq-agent-service"
+    assert body.get("status") == "healthy"
+    assert body.get("service") == "ai-agent-service"
 
 
 def test_agent_fallback_no_key(agent_client):
@@ -164,9 +164,10 @@ def test_agent_fallback_no_key(agent_client):
     rule-based decision logic works correctly and returns HTTP 200.
     """
     import agent_service as svc
-    # Override global Groq client to None to trigger fallback block
-    original_client = svc.client
-    svc.client = None
+    orig_gemini = svc.gemini_client
+    orig_groq = svc.groq_client
+    svc.gemini_client = None
+    svc.groq_client = None
 
     try:
         r = agent_client.post("/agent/decide", json=VALID_AGENT_PAYLOAD)
@@ -179,20 +180,21 @@ def test_agent_fallback_no_key(agent_client):
         assert "fallback" in trace_summary.lower() or "Fallback" in trace_summary, \
             f"Expected fallback in reasoning trace, got: {trace_summary!r}"
     finally:
-        # Restore original client
-        svc.client = original_client
+        svc.gemini_client = orig_gemini
+        svc.groq_client = orig_groq
 
 
 def test_agent_fallback_status_field(agent_client):
     """
-    When Groq client is None (agent unavailable), the response MUST include
+    When LLM client is None (agent unavailable), the response MUST include
     fallback_status == 'agent_unavailable_fallback' so callers can distinguish
     real AI decisions from rule-based substitutions.
-    This is the key assertion for Step 2 of the buildathon fixes.
     """
     import agent_service as svc
-    original_client = svc.client
-    svc.client = None
+    orig_gemini = svc.gemini_client
+    orig_groq = svc.groq_client
+    svc.gemini_client = None
+    svc.groq_client = None
 
     try:
         r = agent_client.post("/agent/decide", json=VALID_AGENT_PAYLOAD)
@@ -200,35 +202,34 @@ def test_agent_fallback_status_field(agent_client):
         body = r.json()
         fallback_status = body.get("fallback_status")
         assert fallback_status == "agent_unavailable_fallback", (
-            f"Expected fallback_status='agent_unavailable_fallback', got: {fallback_status!r}. "
-            f"This field MUST be set when the rule-based fallback is used so the dashboard "
-            f"can show the degraded-agent warning banner."
+            f"Expected fallback_status='agent_unavailable_fallback', got: {fallback_status!r}."
         )
     finally:
-        svc.client = original_client
+        svc.gemini_client = orig_gemini
+        svc.groq_client = orig_groq
 
 
 def test_agent_status_endpoint(agent_client):
     """
-    GET /agent/status should return groq_available and fallback_only fields.
-    When client is None, fallback_only must be True and status must be 'degraded'.
+    GET /agent/status should return llm_available and fallback_only fields.
+    When clients are None, fallback_only must be True and status must be 'degraded'.
     """
     import agent_service as svc
-    original_client = svc.client
-    svc.client = None
+    orig_gemini = svc.gemini_client
+    orig_groq = svc.groq_client
+    svc.gemini_client = None
+    svc.groq_client = None
 
     try:
         r = agent_client.get("/agent/status")
         assert r.status_code == 200, f"Expected 200, got {r.status_code}"
         body = r.json()
-        assert body.get("groq_available") is False, \
-            f"Expected groq_available=False when client=None, got: {body.get('groq_available')}"
-        assert body.get("fallback_only") is True, \
-            f"Expected fallback_only=True when client=None, got: {body.get('fallback_only')}"
-        assert body.get("status") == "degraded", \
-            f"Expected status='degraded' when client=None, got: {body.get('status')!r}"
+        assert body.get("llm_available") is False
+        assert body.get("fallback_only") is True
+        assert body.get("status") == "degraded"
     finally:
-        svc.client = original_client
+        svc.gemini_client = orig_gemini
+        svc.groq_client = orig_groq
 
 
 # ══════════════════════════════════════════════════════════════════════════════
