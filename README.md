@@ -3,7 +3,7 @@
 [![Live Frontend Demo](https://img.shields.io/badge/Live_Demo-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://ai-revenue-recovery-engine-git-main-nitheeshps-projects.vercel.app/)
 [![Live Backend API](https://img.shields.io/badge/Backend_API-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://ai-revenue-recovery-engine.onrender.com/health)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org/)
-[![Python FastAPI](https://img.shields.io/badge/Python-3.13_FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Python FastAPI](https://img.shields.io/badge/Python-3.11_FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Google Gemini & Groq](https://img.shields.io/badge/LLM-Gemini_3.7_&_Groq_Llama--3-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
 [![Razorpay API](https://img.shields.io/badge/Integration-Razorpay-0C2340?style=for-the-badge&logo=razorpay&logoColor=white)](https://razorpay.com/)
 [![Database](https://img.shields.io/badge/Database-Neon_PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white)](https://neon.tech/)
@@ -13,24 +13,26 @@ An enterprise-grade, autonomous, multi-agent AI revenue recovery engine engineer
 
 ---
 
-## ⚡ Measured Impact & Performance
+## ⚡ Key Highlights & Benchmark Impact
 
-| Metric | Measured Impact |
-| :--- | :--- |
-| **Ingestion Throughput** | **2,400+ req/sec** (p99 < 1.8ms) via Go Fiber zero-copy engine |
-| **Root-Cause Triage** | **<15ms deterministic classification** via native XGBoost Classifier |
-| **Recovery Uplift** | **+107.65% recovered revenue** (+18.4% simulated GMV recovery over naive retry rules) |
-| **Compliance & Safety** | **100% structured JSONB audit trails** with hard idempotency locks and stopping gates |
+| Metric | Measured Impact | Description |
+| :--- | :--- | :--- |
+| **Ingestion Throughput** | **2,400+ req/sec** | p99 < 1.8ms via Go Fiber zero-copy engine |
+| **Root-Cause Triage** | **<15ms latency** | Native XGBoost classifier for failure taxonomy |
+| **Revenue Lift** | **+107.65% recovered** | +18.4% simulated GMV recovery over naive retry rules |
+| **Razorpay Link Dispatch** | **Real-time (<100ms)** | Instant dynamic recovery link generation via Razorpay API |
+| **Compliance & Safety** | **100% JSONB Audits** | Distributed idempotency locks & stopping rule safety gates |
 
 ---
 
-## 🌐 Live Deployments
+## 🌐 Live Deployments & Service Endpoints
 
-| Component | Platform | URL | Status |
+| Component | Platform / Tech | URL / Port | Status |
 |---|---|---|---|
-| **Interactive Telemetry Dashboard** | Vercel | [ai-revenue-recovery-engine.vercel.app](https://ai-revenue-recovery-engine-git-main-nitheeshps-projects.vercel.app/) | 🟢 Active |
-| **Go Ingestion Backend** | Render | [ai-revenue-recovery-engine.onrender.com](https://ai-revenue-recovery-engine.onrender.com/health) | 🟢 Active |
-| **Razorpay Webhook Receiver** | Render | `POST /api/v1/webhooks/razorpay` | 🟢 Active |
+| **Interactive Telemetry Dashboard** | Vercel / React + Vite | [ai-revenue-recovery-engine.vercel.app](https://ai-revenue-recovery-engine-git-main-nitheeshps-projects.vercel.app/) | 🟢 Active |
+| **Go Ingestion API Gateway** | Render / Go Fiber | [ai-revenue-recovery-engine.onrender.com](https://ai-revenue-recovery-engine.onrender.com) | 🟢 Active (Port `8080`) |
+| **ML Inference Service** | Python FastAPI / XGBoost | `http://localhost:8001` (`/predict`) | 🟢 Active (Port `8001`) |
+| **AI Agent Decision Service** | Python FastAPI / Gemini | `http://localhost:8002` (`/agent/recover`) | 🟢 Active (Port `8002`) |
 | **Serverless Database** | Neon Cloud | Managed PostgreSQL 15+ with JSONB traces | 🟢 Connected |
 
 ---
@@ -43,27 +45,31 @@ An enterprise-grade, autonomous, multi-agent AI revenue recovery engine engineer
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ System Architecture & Workflow
 
 ```mermaid
 sequenceDiagram
 autonumber
 participant GW as Payment Gateway (Razorpay Webhook)
-participant GO as Go Fiber Ingestion
-participant ML as FastAPI (XGBoost Classifier)
-participant AI as LLM Agent (Gemini / Groq Llama-3)
+participant GO as Go Fiber Ingestion (Port 8080)
+participant ML as FastAPI (XGBoost Classifier - Port 8001)
+participant AI as LLM Agent (Gemini / Groq - Port 8002)
+participant RZP as Razorpay Payment Links API
 participant DB as Neon PostgreSQL (JSONB Traces)
+
 GW->>GO: POST /api/v1/webhooks/razorpay (payment.failed)
 GO->>GO: Validate HMAC-SHA256 & Acquire Idempotency Lock
 GO-->>GW: 200 OK (Immediate Ack < 2ms)
-GO->>ML: POST /classify (Error Code, Latency, Bank Payload)
+GO->>ML: POST /predict (Error Code, Latency, Bank Payload)
 ML-->>GO: Root Cause + Recovery Confidence Score
 alt Recoverable & Non-Terminal
-GO->>AI: Trigger Contextual Action Plan (LTV + Attempt History)
-AI-->>GO: Structured Decision (Smart Retry Window + Dynamic Link)
-GO->>DB: Write Immutable Audit Trail (JSONB)
+    GO->>AI: Trigger Contextual Action Plan (LTV + Attempt History)
+    AI-->>GO: Structured Decision (Smart Retry Window + Dynamic Link)
+    GO->>RZP: POST /v1/payment_links (Generate real recovery URL)
+    RZP-->>GO: Returns rzp.io short URL
+    GO->>DB: Write Immutable Audit Trail (JSONB)
 else Terminal Failure (Fraud / Hard Decline / Exceeded Budget)
-GO->>DB: Log Dead-Letter & Halt Retry Loop
+    GO->>DB: Log Dead-Letter & Halt Retry Loop
 end
 ```
 
@@ -71,7 +77,7 @@ end
 
 ## 🛡️ Production Guardrails & Failure Modes
 
-*The production differentiators ensuring safety, compliance, and zero financial leakage across payment rails:*
+*Production-proven differentiators ensuring safety, compliance, and zero financial leakage across payment rails:*
 
 | Failure Mode | Production Risk | Engine Mitigation |
 | :--- | :--- | :--- |
@@ -92,16 +98,6 @@ The engine strictly evaluates compliance rules before dispatching any recovery a
 | **`LOW_LTV_LOW_AMOUNT`** | `customer_ltv < ₹500` AND `amount < ₹200` | Skip retry — Not economically cost-effective. |
 | **`TIMEOUT_48H`** | `elapsed_time >= 48 hours` | Escalate to human operations queue. |
 | **`PERMANENT_FAILURE`** | `card_stolen`, `fraud_block`, `account_closed` | Immediate Hard Stop — Zero retries dispatched. |
-
----
-
-## 💡 Technical Stack Justification
-
-* **Go (Fiber):** Chosen for sub-millisecond webhook ingestion, zero-copy memory footprint, and native goroutine concurrency under 10k+ burst RPS without thread starvation.
-* **XGBoost (FastAPI):** Used for tabular error triage. Classical ML evaluates gateway codes, merchant MCC, and historical bank latency in `<15ms` where LLMs are too slow and non-deterministic.
-* **Google Gemini & Groq (Llama-3 70B):** Evaluates multi-factor customer context for non-deterministic customer nudging (e.g., dynamic payment links vs. timed collect requests) with structured JSON schemas and sub-second inference.
-* **Neon PostgreSQL:** Schema-enforced JSONB storage for audit-ready compliance, partial indexes for unrecovered queues, and instant merchant telemetry.
-* **React + Vite Dashboard:** Real-time KPI telemetry, interactive failure cause breakdown, and strategy benchmark comparisons.
 
 ---
 
@@ -136,58 +132,95 @@ The engine strictly evaluates compliance rules before dispatching any recovery a
 
 ---
 
-## 🚀 Quick Start & Verification
+## 💻 Terminal & Live Demo Commands
 
-### 1. Clone and Boot Services
+### 1. Trigger Full End-to-End AI Recovery (Terminal Demo)
+Fires a cryptographically signed Razorpay webhook, routes through XGBoost ML triage, executes Gemini Agent recovery logic, and creates a real Razorpay payment link:
+
+```powershell
+# Scenario 1: Gateway Timeout on HDFC Card (High LTV)
+.\scripts\fire_webhook.ps1 -ErrorCode "GATEWAY_TIMEOUT" -AmountPaise 249900 -Bank "HDFC" -Method "card"
+
+# Scenario 2: Insufficient Funds on SBI UPI
+.\scripts\fire_webhook.ps1 -ErrorCode "INSUFFICIENT_FUNDS" -AmountPaise 89900 -Bank "SBI" -Method "upi"
+
+# Scenario 3: Expired Card on ICICI Credit Card
+.\scripts\fire_webhook.ps1 -ErrorCode "EXPIRED_CARD" -AmountPaise 599900 -Bank "ICICI" -Method "credit_card"
+```
+
+### 2. Direct AI Agent Inference (Port 8002)
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8002/agent/recover" -Method Post -ContentType "application/json" -Body '{
+  "job_id": "job-demo-001",
+  "failed_payment_id": "fp-demo-001",
+  "payment_context": {
+    "transaction_id": "tx_demo_001",
+    "customer_id": "cust_demo_001",
+    "amount": 2499.0,
+    "currency": "INR",
+    "payment_method": "UPI",
+    "failure_reason_raw": "gateway_timeout"
+  },
+  "customer_profile": {
+    "customer_ltv": 5000.0,
+    "recent_retries": 1,
+    "time_since_last_attempt_mins": 15
+  },
+  "agent_config": {
+    "model_id": "gemini-1.5-flash",
+    "enable_chain_of_thought": true
+  },
+  "system_context": {
+    "gateway_health_status": "degraded",
+    "current_gateway_error_rate_pct": 12.5,
+    "is_peak_hour": true
+  }
+}' | ConvertTo-Json -Depth 5
+```
+
+---
+
+## 🚀 Quick Start & Local Setup
+
+### Option A: Running with Local Microservices
+
+#### 1. Setup Environment
 ```bash
-git clone https://github.com/NitheeshP19/AI-Revenue-recovery-Engine.git
-cd AI-Revenue-recovery-Engine
 cp .env.example .env
+```
+
+#### 2. Start ML and AI Agent Services
+```bash
+cd ml
+pip install -r requirements.txt
+# Terminal 1: ML Inference Service
+python -m uvicorn inference_service:app --host 0.0.0.0 --port 8001 --reload
+
+# Terminal 2: Gemini / Groq Agent Service
+python -m uvicorn agent_service:app --host 0.0.0.0 --port 8002 --reload
+```
+
+#### 3. Start Go Ingestion Engine
+```bash
+cd go-api
+go run main.go
+# Or run pre-built binary: .\go-api.exe
+```
+
+#### 4. Start React Telemetry Dashboard
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+Open **`http://localhost:5173`** in your browser.
+
+---
+
+### Option B: Docker Compose
+```bash
 docker compose up -d --build
 ```
-
-### 2. Simulate a Failed Payment Webhook
-```bash
-curl -X POST http://localhost:3000/api/v1/webhooks/razorpay \
-  -H "Content-Type: application/json" \
-  -H "X-Razorpay-Signature: test_signature" \
-  -d '{
-    "entity": "event",
-    "event": "payment.failed",
-    "contains": ["payment"],
-    "payload": {
-      "payment": {
-        "entity": {
-          "id": "pay_test_987654",
-          "amount": 249900,
-          "currency": "INR",
-          "status": "failed",
-          "method": "card",
-          "error_code": "GATEWAY_TIMEOUT",
-          "error_description": "Gateway timed out responding to issuer bank",
-          "error_source": "gateway",
-          "error_step": "payment_authorization",
-          "error_reason": "gateway_error",
-          "bank": "HDFC",
-          "email": "customer@example.com",
-          "contact": "+919876543210"
-        }
-      }
-    }
-  }'
-```
-
-### 3. Verify System Output
-* **Terminal Logs:** Inspect real-time Go worker logs and XGBoost triage output:
-  ```bash
-  docker compose logs -f go-api ml-service gemini-agent
-  ```
-* **Database Audit Logs:** Query PostgreSQL to inspect the immutable decision trace:
-  ```sql
-  SELECT payment_id, action_taken, status, retry_count, ai_reasoning 
-  FROM razorpay_recovery_actions 
-  ORDER BY created_at DESC LIMIT 5;
-  ```
 
 ---
 
