@@ -19,6 +19,7 @@ const MOCK_METRICS = {
     simulation_id: "2960a161-265f-474e-8c9e-b1720f34ede2",
     generated_at: "2026-08-20T14:12:59Z",
     sample_size: 200,
+    random_seed: 42,
     schema_version: "1.0.0",
   },
   kpis: {
@@ -77,7 +78,7 @@ const LIVE_FEED_POOL = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 function formatCurrency(val) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+  return "\u20B9" + new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
 }
 
 function shortId(id) {
@@ -386,7 +387,7 @@ function ReasoningFeed({ events }) {
                 }
                 <span className="text-slate-300 font-mono text-xs truncate">{shortId(ev.transaction_id)}</span>
                 <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${REASON_COLORS[ev.failure_reason] || "text-slate-400 bg-slate-700 border-slate-600"} shrink-0`}>
-                  {ev.failure_reason.replace(/_/g, "_")}
+                  {ev.failure_reason.replace(/_/g, " ")}
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -448,7 +449,7 @@ function StrategyComparisonRow({ strategies, kpis }) {
       </h2>
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="text-center text-xs text-slate-500 font-medium uppercase tracking-wider pb-2 border-b border-slate-800">Rule-Based Baseline</div>
-        <div className="text-center text-xs text-cyan-400 font-medium uppercase tracking-wider pb-2 border-b border-cyan-500/30">Gemini </div>
+        <div className="text-center text-xs text-cyan-400 font-medium uppercase tracking-wider pb-2 border-b border-cyan-500/30">AI Agent (Gemini)</div>
       </div>
       <div className="flex flex-col gap-3">
         {cols.map((col) => (
@@ -481,13 +482,13 @@ export default function RevenueRecoveryDashboard() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const showDegradedBanner = agentDegraded && !bannerDismissed;
 
-  // Live feed state
+  // Live feed state — pre-populate with 6 events for a rich initial view
   const [feedEvents, setFeedEvents] = useState(() =>
-    MOCK_METRICS.failure_reason_breakdown.slice(0, 3).map((_, i) => ({
-      ...LIVE_FEED_POOL[i],
+    LIVE_FEED_POOL.slice(0, 6).map((template, i) => ({
+      ...template,
       _id: generateTxId(),
       transaction_id: generateTxId(),
-      _time: new Date().toLocaleTimeString(),
+      _time: new Date(Date.now() - (6 - i) * 12000).toLocaleTimeString(),
       ai_latency_ms: Math.floor(Math.random() * 60 + 20),
     }))
   );
@@ -560,7 +561,7 @@ export default function RevenueRecoveryDashboard() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 bg-slate-800/60 border border-slate-700/50 rounded-xl px-3 py-2 text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-slate-400">Gemini  · Active</span>
+              <span className="text-slate-400">Gemini AI &middot; Active</span>
             </div>
             <div className="text-xs text-slate-600">
               {new Date(meta.generated_at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
@@ -632,7 +633,7 @@ export default function RevenueRecoveryDashboard() {
             icon={Zap}
             label="Avg Decision Latency"
             value={<><AnimatedCounter target={kpis.ai_avg_latency_ms} />ms</>}
-            sub="Via Gemini  inference"
+            sub="Via Gemini AI inference"
             accent="amber"
             delay={0.3}
           />
